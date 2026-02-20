@@ -14,19 +14,27 @@ import {
   readRecebimentos,
   readObraFinancialSummary,
   addAdicional,
+  updateRecebimento,
+  updateAdicional,
+  updatePayment,
   type FuncionarioSummary,
   type PaymentRecord,
   type ObraSheetConfig,
   type RecebimentoRecord,
   type ObraFinancialSummary,
+  type AdicionalConfig,
 } from '../../services/google-sheets-obras'
+import { formatDateBR, dateBRToISO } from '../../utils/date'
+
+import type { ResumoObraData } from './ResumoObra'
 
 interface Props {
   spreadsheetId: string
   obraNome: string
+  onSummaryDataChange?: (data: ResumoObraData) => void
 }
 
-export function ManageSheet({ spreadsheetId, obraNome }: Props) {
+export function ManageSheet({ spreadsheetId, obraNome, onSummaryDataChange }: Props) {
   const [config, setConfig] = useState<ObraSheetConfig | null>(null)
   const [summaries, setSummaries] = useState<FuncionarioSummary[]>([])
   const [financial, setFinancial] = useState<ObraFinancialSummary | null>(null)
@@ -52,6 +60,18 @@ export function ManageSheet({ spreadsheetId, obraNome }: Props) {
   // Tab do painel financeiro
   const [finTab, setFinTab] = useState<'adicionais' | 'recebimentos'>('recebimentos')
 
+  // Edição inline
+  const [editingRecebimento, setEditingRecebimento] = useState<number | null>(null)
+  const [editingAdicional, setEditingAdicional] = useState<number | null>(null)
+  const [editingPayment, setEditingPayment] = useState<number | null>(null)
+  const [editForm, setEditForm] = useState<{
+    data?: string
+    valor?: number
+    descricao?: string
+    pdfLink?: string
+  }>({})
+  const [savingEdit, setSavingEdit] = useState(false)
+
   // Carregar dados iniciais
   const loadAll = useCallback(async () => {
     try {
@@ -76,6 +96,19 @@ export function ManageSheet({ spreadsheetId, obraNome }: Props) {
     setLoading(true)
     loadAll().finally(() => setLoading(false))
   }, [spreadsheetId]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Expor dados para exportação de resumo (imagem)
+  useEffect(() => {
+    if (!loading && config && onSummaryDataChange) {
+      onSummaryDataChange({
+        obraNome,
+        financial,
+        recebimentos,
+        config,
+        summaries,
+      })
+    }
+  }, [loading, config, obraNome, financial, recebimentos, summaries, onSummaryDataChange])
 
   // Carregar histórico ao selecionar funcionário
   useEffect(() => {
@@ -148,6 +181,103 @@ export function ManageSheet({ spreadsheetId, obraNome }: Props) {
       setAddingAdicional(false)
     }
   }, [spreadsheetId, addDesc, addValor])
+
+  // Salvar edição de recebimento (editForm.data é YYYY-MM-DD do input date)
+  const handleSaveRecebimento = useCallback(async () => {
+    if (editingRecebimento == null || !editForm.data || editForm.valor == null) return
+    const dataDate = new Date(editForm.data + 'T12:00:00')
+    if (isNaN(dataDate.getTime())) return
+
+    setSavingEdit(true)
+    try {
+      await updateRecebimento(
+        spreadsheetId,
+        editingRecebimento,
+        dataDate,
+        editForm.valor,
+        editForm.descricao ?? '',
+        editForm.pdfLink ?? '', // mantém link original se não editado
+      )
+      const [fin, receb] = await Promise.all([
+        readObraFinancialSummary(spreadsheetId),
+        readRecebimentos(spreadsheetId),
+      ])
+      setFinancial(fin)
+      setRecebimentos(receb)
+      setEditingRecebimento(null)
+      setEditForm({})
+    } catch (err) {
+      console.error('Erro ao salvar recebimento:', err)
+    } finally {
+      setSavingEdit(false)
+    }
+  }, [spreadsheetId, editingRecebimento, editForm])
+
+  // Salvar edição de adicional (editForm.data é YYYY-MM-DD do input date)
+  const handleSaveAdicional = useCallback(async () => {
+    if (editingAdicional == null || !editForm.descricao || editForm.valor == null || !editForm.data)
+      return
+
+    setSavingEdit(true)
+    try {
+      const dataBR = formatDateBR(new Date(editForm.data + 'T12:00:00'))
+      await updateAdicional(
+        spreadsheetId,
+        editingAdicional,
+        editForm.descricao,
+        editForm.valor,
+        dataBR,
+      )
+      const [newConfig, fin, receb] = await Promise.all([
+        readAllSummaries(spreadsheetId),
+        readObraFinancialSummary(spreadsheetId),
+        readRecebimentos(spreadsheetId),
+      ])
+      setConfig(newConfig.config)
+      setFinancial(fin)
+      setRecebimentos(receb)
+      setEditingAdicional(null)
+      setEditForm({})
+    } catch (err) {
+      console.error('Erro ao salvar adicional:', err)
+    } finally {
+      setSavingEdit(false)
+    }
+  }, [spreadsheetId, editingAdicional, editForm])
+
+  // Salvar edição de pagamento (editForm.data é YYYY-MM-DD do input date)
+  const handleSavePayment = useCallback(async () => {
+    if (!selectedName || editingPayment == null || !editForm.data || editForm.valor == null) return
+    const dataDate = new Date(editForm.data + 'T12:00:00')
+    if (isNaN(dataDate.getTime())) return
+
+    setSavingEdit(true)
+    try {
+      await updatePayment(
+        spreadsheetId,
+        selectedName,
+        editingPayment,
+        dataDate,
+        editForm.valor,
+        editForm.descricao ?? '',
+      )
+      const [newHistory, allSums, fin] = await Promise.all([
+        readPaymentHistory(spreadsheetId, selectedName),
+        readAllSummaries(spreadsheetId),
+        readObraFinancialSummary(spreadsheetId),
+      ])
+      setHistory(newHistory)
+      setSummaries(allSums.summaries)
+      setConfig(allSums.config)
+      setFinancial(fin)
+      setEditingPayment(null)
+      setEditForm({})
+    } catch (err) {
+      console.error('Erro ao salvar pagamento:', err)
+    } finally {
+      setSavingEdit(false)
+    }
+  }, [spreadsheetId, selectedName, editingPayment, editForm])
 
   const selected = summaries.find((s) => s.nome === selectedName)
 
@@ -236,7 +366,7 @@ export function ManageSheet({ spreadsheetId, obraNome }: Props) {
                   </p>
                 ) : (
                   <div className="overflow-hidden rounded-lg border border-gray-100">
-                    <div className="grid grid-cols-[90px_1fr_1fr_40px] border-b border-gray-100 bg-gray-50 px-4 py-2">
+                    <div className="grid grid-cols-[90px_1fr_1fr_80px] border-b border-gray-100 bg-gray-50 px-4 py-2">
                       <span className="text-xs font-semibold text-gray-400">Data</span>
                       <span className="text-xs font-semibold text-gray-400">Valor</span>
                       <span className="text-xs font-semibold text-gray-400">Descrição</span>
@@ -244,32 +374,95 @@ export function ManageSheet({ spreadsheetId, obraNome }: Props) {
                     </div>
                     {recebimentos.map((r, i) => (
                       <div
-                        key={i}
-                        className={`grid grid-cols-[90px_1fr_1fr_40px] px-4 py-2.5 ${
+                        key={r.sheetRow}
+                        className={`grid grid-cols-[90px_1fr_1fr_80px] items-center gap-2 px-4 py-2.5 ${
                           i < recebimentos.length - 1 ? 'border-b border-gray-50' : ''
-                        }`}
+                        } ${editingRecebimento === r.sheetRow ? 'bg-amber-50/50' : ''}`}
                       >
-                        <span className="text-sm text-gray-600">{r.data}</span>
-                        <span className="font-mono text-sm tabular-nums text-gray-900">{r.valor}</span>
-                        <span className="text-sm text-gray-500">{r.descricao}</span>
-                        {r.pdfLink ? (
-                          <a
-                            href={r.pdfLink}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-gray-300 transition-colors hover:text-gray-600"
-                            title="Ver PDF"
-                          >
-                            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
-                            </svg>
-                          </a>
+                        {editingRecebimento === r.sheetRow ? (
+                          <>
+                            <input
+                              type="date"
+                              value={editForm.data ?? dateBRToISO(r.data)}
+                              onChange={(e) => setEditForm((f) => ({ ...f, data: e.target.value }))}
+                              className="rounded border border-gray-200 px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-gray-200"
+                            />
+                            <div className="min-w-0">
+                              <CurrencyInput
+                                value={editForm.valor ?? r.valorCentavos}
+                                onChange={(v) => setEditForm((f) => ({ ...f, valor: v }))}
+                                className="[&_input]:py-1 [&_input]:text-sm"
+                              />
+                            </div>
+                            <input
+                              type="text"
+                              value={editForm.descricao ?? r.descricao}
+                              onChange={(e) => setEditForm((f) => ({ ...f, descricao: e.target.value }))}
+                              placeholder="Descrição"
+                              className="min-w-0 rounded border border-gray-200 px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-gray-200"
+                            />
+                            <div className="flex items-center gap-1">
+                              <button
+                                onClick={handleSaveRecebimento}
+                                disabled={savingEdit}
+                                className="rounded p-1 text-green-600 transition-colors hover:bg-green-50"
+                                title="Salvar"
+                              >
+                                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                                </svg>
+                              </button>
+                              <button
+                                onClick={() => {
+                                  setEditingRecebimento(null)
+                                  setEditForm({})
+                                }}
+                                className="rounded p-1 text-gray-400 transition-colors hover:bg-gray-100"
+                                title="Cancelar"
+                              >
+                                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                              </button>
+                            </div>
+                          </>
                         ) : (
-                          <span />
+                          <>
+                            <span className="text-sm text-gray-600">{r.data}</span>
+                            <span className="font-mono text-sm tabular-nums text-gray-900">{r.valor}</span>
+                            <span className="text-sm text-gray-500">{r.descricao}</span>
+                            <div className="flex items-center gap-1">
+                              {r.pdfLink ? (
+                                <a
+                                  href={r.pdfLink}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-gray-300 transition-colors hover:text-gray-600"
+                                  title="Ver PDF"
+                                >
+                                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
+                                  </svg>
+                                </a>
+                              ) : null}
+                              <button
+                                onClick={() => {
+                                  setEditingRecebimento(r.sheetRow)
+                                  setEditForm({ data: dateBRToISO(r.data), valor: r.valorCentavos, descricao: r.descricao, pdfLink: r.pdfLink })
+                                }}
+                                className="rounded p-1 text-gray-300 transition-colors hover:bg-gray-100 hover:text-gray-600"
+                                title="Editar"
+                              >
+                                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                                </svg>
+                              </button>
+                            </div>
+                          </>
                         )}
                       </div>
                     ))}
-                    <div className="grid grid-cols-[90px_1fr_1fr_40px] border-t border-gray-200 bg-gray-50 px-4 py-2.5">
+                    <div className="grid grid-cols-[90px_1fr_1fr_80px] border-t border-gray-200 bg-gray-50 px-4 py-2.5">
                       <span className="text-xs font-semibold text-gray-500">Total</span>
                       <span className="font-mono text-sm font-semibold tabular-nums text-gray-900">
                         {formatCurrency(recebimentos.reduce((a, r) => a + r.valorCentavos, 0))}
@@ -314,26 +507,98 @@ export function ManageSheet({ spreadsheetId, obraNome }: Props) {
                     </p>
                   ) : (
                     <div className="overflow-hidden rounded-lg border border-gray-100">
-                      <div className="grid grid-cols-[1fr_120px_90px] border-b border-gray-100 bg-gray-50 px-4 py-2">
+                      <div className="grid grid-cols-[1fr_120px_90px_80px] border-b border-gray-100 bg-gray-50 px-4 py-2">
                         <span className="text-xs font-semibold text-gray-400">Descrição</span>
                         <span className="text-xs font-semibold text-gray-400">Valor</span>
                         <span className="text-xs font-semibold text-gray-400">Data</span>
+                        <span />
                       </div>
-                      {config!.adicionais.map((a, i) => (
-                        <div
-                          key={i}
-                          className={`grid grid-cols-[1fr_120px_90px] px-4 py-2.5 ${
-                            i < config!.adicionais.length - 1 ? 'border-b border-gray-50' : ''
-                          }`}
-                        >
-                          <span className="text-sm text-gray-900">{a.descricao}</span>
-                          <span className="font-mono text-sm tabular-nums text-amber-700">
-                            + {formatCurrency(a.valor)}
-                          </span>
-                          <span className="text-xs text-gray-400">{a.data}</span>
-                        </div>
-                      ))}
-                      <div className="grid grid-cols-[1fr_120px_90px] border-t border-gray-200 bg-gray-50 px-4 py-2.5">
+                      {config!.adicionais.map((a, i) => {
+                        const sheetRow = (a as AdicionalConfig & { sheetRow?: number }).sheetRow ?? 0
+                        const isEditing = editingAdicional === sheetRow
+                        return (
+                          <div
+                            key={i}
+                            className={`grid grid-cols-[1fr_120px_90px_80px] items-center gap-2 px-4 py-2.5 ${
+                              i < config!.adicionais.length - 1 ? 'border-b border-gray-50' : ''
+                            } ${isEditing ? 'bg-amber-50/50' : ''}`}
+                          >
+                            {isEditing ? (
+                              <>
+                                <input
+                                  type="text"
+                                  value={editForm.descricao ?? a.descricao}
+                                  onChange={(e) => setEditForm((f) => ({ ...f, descricao: e.target.value }))}
+                                  placeholder="Descrição"
+                                  className="min-w-0 rounded border border-gray-200 px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-gray-200"
+                                />
+                                <div className="min-w-0">
+                                  <CurrencyInput
+                                    value={editForm.valor ?? a.valor}
+                                    onChange={(v) => setEditForm((f) => ({ ...f, valor: v }))}
+                                    className="[&_input]:py-1 [&_input]:text-sm"
+                                  />
+                                </div>
+                                <input
+                                  type="date"
+                                  value={editForm.data ?? dateBRToISO(a.data)}
+                                  onChange={(e) => setEditForm((f) => ({ ...f, data: e.target.value }))}
+                                  className="rounded border border-gray-200 px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-gray-200"
+                                />
+                                <div className="flex items-center gap-1">
+                                  <button
+                                    onClick={handleSaveAdicional}
+                                    disabled={savingEdit}
+                                    className="rounded p-1 text-green-600 transition-colors hover:bg-green-50"
+                                    title="Salvar"
+                                  >
+                                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                                    </svg>
+                                  </button>
+                                  <button
+                                    onClick={() => {
+                                      setEditingAdicional(null)
+                                      setEditForm({})
+                                    }}
+                                    className="rounded p-1 text-gray-400 transition-colors hover:bg-gray-100"
+                                    title="Cancelar"
+                                  >
+                                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                                    </svg>
+                                  </button>
+                                </div>
+                              </>
+                            ) : (
+                              <>
+                                <span className="text-sm text-gray-900">{a.descricao}</span>
+                                <span className="font-mono text-sm tabular-nums text-amber-700">
+                                  + {formatCurrency(a.valor)}
+                                </span>
+                                <span className="text-xs text-gray-400">{a.data}</span>
+                                <button
+                                  onClick={() => {
+                                    setEditingAdicional(sheetRow)
+                                    setEditForm({
+                                      descricao: a.descricao,
+                                      valor: a.valor,
+                                      data: dateBRToISO(a.data),
+                                    })
+                                  }}
+                                  className="rounded p-1 text-gray-300 transition-colors hover:bg-gray-100 hover:text-gray-600"
+                                  title="Editar"
+                                >
+                                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                                  </svg>
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        )
+                      })}
+                      <div className="grid grid-cols-[1fr_120px_90px_80px] border-t border-gray-200 bg-gray-50 px-4 py-2.5">
                         <span className="text-xs font-semibold text-gray-500">Total</span>
                         <span className="font-mono text-sm font-semibold tabular-nums text-amber-700">
                           + {formatCurrency(config!.adicionais.reduce((a, x) => a + x.valor, 0))}
@@ -454,28 +719,98 @@ export function ManageSheet({ spreadsheetId, obraNome }: Props) {
               </p>
             ) : (
               <div className="overflow-hidden rounded-lg border border-gray-100">
-                <div className="grid grid-cols-[100px_1fr_1fr] border-b border-gray-100 bg-gray-50 px-4 py-2">
+                <div className="grid grid-cols-[100px_1fr_1fr_80px] border-b border-gray-100 bg-gray-50 px-4 py-2">
                   <span className="text-xs font-semibold text-gray-400">Data</span>
                   <span className="text-xs font-semibold text-gray-400">Valor</span>
                   <span className="text-xs font-semibold text-gray-400">Descrição</span>
+                  <span />
                 </div>
 
-                {history.map((p, i) => (
-                  <div
-                    key={i}
-                    className={`grid grid-cols-[100px_1fr_1fr] px-4 py-2.5 ${
-                      i < history.length - 1 ? 'border-b border-gray-50' : ''
-                    }`}
-                  >
-                    <span className="text-sm text-gray-600">{p.data}</span>
-                    <span className="font-mono text-sm tabular-nums text-gray-900">
-                      {p.valor}
-                    </span>
-                    <span className="text-sm text-gray-500">{p.descricao}</span>
-                  </div>
-                ))}
+                {history.map((p, i) => {
+                  const sheetRow = p.sheetRow ?? (2 + i)
+                  const isEditing = editingPayment === sheetRow
+                  return (
+                    <div
+                      key={sheetRow}
+                      className={`grid grid-cols-[100px_1fr_1fr_80px] items-center gap-2 px-4 py-2.5 ${
+                        i < history.length - 1 ? 'border-b border-gray-50' : ''
+                      } ${isEditing ? 'bg-amber-50/50' : ''}`}
+                    >
+                      {isEditing ? (
+                        <>
+                          <input
+                            type="date"
+                            value={editForm.data ?? dateBRToISO(p.data)}
+                            onChange={(e) => setEditForm((f) => ({ ...f, data: e.target.value }))}
+                            className="rounded border border-gray-200 px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-gray-200"
+                          />
+                          <div className="min-w-0">
+                            <CurrencyInput
+                              value={editForm.valor ?? p.valorCentavos}
+                              onChange={(v) => setEditForm((f) => ({ ...f, valor: v }))}
+                              className="[&_input]:py-1 [&_input]:text-sm"
+                            />
+                          </div>
+                          <input
+                            type="text"
+                            value={editForm.descricao ?? p.descricao}
+                            onChange={(e) => setEditForm((f) => ({ ...f, descricao: e.target.value }))}
+                            placeholder="Descrição"
+                            className="min-w-0 rounded border border-gray-200 px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-gray-200"
+                          />
+                          <div className="flex items-center gap-1">
+                            <button
+                              onClick={handleSavePayment}
+                              disabled={savingEdit}
+                              className="rounded p-1 text-green-600 transition-colors hover:bg-green-50"
+                              title="Salvar"
+                            >
+                              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                              </svg>
+                            </button>
+                            <button
+                              onClick={() => {
+                                setEditingPayment(null)
+                                setEditForm({})
+                              }}
+                              className="rounded p-1 text-gray-400 transition-colors hover:bg-gray-100"
+                              title="Cancelar"
+                            >
+                              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                              </svg>
+                            </button>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <span className="text-sm text-gray-600">{p.data}</span>
+                          <span className="font-mono text-sm tabular-nums text-gray-900">{p.valor}</span>
+                          <span className="text-sm text-gray-500">{p.descricao}</span>
+                          <button
+                            onClick={() => {
+                              setEditingPayment(sheetRow)
+                              setEditForm({
+                                data: dateBRToISO(p.data),
+                                valor: p.valorCentavos,
+                                descricao: p.descricao,
+                              })
+                            }}
+                            className="rounded p-1 text-gray-300 transition-colors hover:bg-gray-100 hover:text-gray-600"
+                            title="Editar"
+                          >
+                            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                            </svg>
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  )
+                })}
 
-                <div className="grid grid-cols-[100px_1fr_1fr] border-t border-gray-200 bg-gray-50 px-4 py-2.5">
+                <div className="grid grid-cols-[100px_1fr_1fr_80px] border-t border-gray-200 bg-gray-50 px-4 py-2.5">
                   <span className="text-xs font-semibold text-gray-500">Total</span>
                   <span className="font-mono text-sm font-semibold tabular-nums text-gray-900">
                     {formatCurrency(history.reduce((a, p) => a + p.valorCentavos, 0))}

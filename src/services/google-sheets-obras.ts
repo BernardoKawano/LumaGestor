@@ -23,6 +23,7 @@ export interface AdicionalConfig {
   descricao: string
   valor: number    // centavos
   data: string     // "DD/MM/YYYY"
+  sheetRow?: number // linha na planilha (1-based), preenchido internamente
 }
 
 export interface ObraSheetConfig {
@@ -37,6 +38,7 @@ export interface PaymentRecord {
   valor: string      // "R$ 1.000,00"
   valorCentavos: number
   descricao: string
+  sheetRow?: number  // linha na planilha (1-based), preenchido internamente
 }
 
 export interface RecebimentoRecord {
@@ -45,6 +47,7 @@ export interface RecebimentoRecord {
   valorCentavos: number
   descricao: string
   pdfLink: string
+  sheetRow: number      // linha na planilha (1-based, para update/delete)
 }
 
 export interface FuncionarioSummary {
@@ -293,7 +296,8 @@ export async function readSheetConfig(spreadsheetId: string): Promise<ObraSheetC
   const funcionarios: FuncionarioConfig[] = []
   const adicionais: AdicionalConfig[] = []
 
-  for (const row of rows) {
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i]
     if (row[0] === 'VALOR_TOTAL_OBRA') {
       valorTotalObra = parseInt(row[1], 10) || 0
     } else if (row[0] === 'FUNCIONARIO') {
@@ -312,6 +316,7 @@ export async function readSheetConfig(spreadsheetId: string): Promise<ObraSheetC
         descricao: row[1] ?? '',
         valor: parseInt(row[2], 10) || 0,
         data: row[3] ?? '',
+        sheetRow: i + 1,
       })
     }
   }
@@ -353,6 +358,71 @@ export async function addAdicional(
   }
 }
 
+/**
+ * Atualiza um adicional existente na aba _CONFIG.
+ * @param sheetRow Linha na planilha (1-based), obtido de AdicionalConfig.sheetRow
+ */
+export async function updateAdicional(
+  spreadsheetId: string,
+  sheetRow: number,
+  descricao: string,
+  valorCentavos: number,
+  data: string,
+): Promise<void> {
+  const token = getToken()
+  if (!token) throw new Error('Sem token de autenticação')
+
+  const range = `_CONFIG!A${sheetRow}:D${sheetRow}`
+
+  const updateResponse = await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}?valueInputOption=RAW`,
+    {
+      method: 'PUT',
+      headers: {
+        Authorization: `Bearer ${token.access_token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        values: [['ADICIONAL', descricao, String(valorCentavos), data]],
+      }),
+    },
+  )
+
+  if (!updateResponse.ok) {
+    throw new Error(`Erro ao atualizar adicional: ${updateResponse.status}`)
+  }
+}
+
+/**
+ * Remove um adicional da aba _CONFIG (limpa a linha).
+ * @param sheetRow Linha na planilha (1-based), obtido de AdicionalConfig.sheetRow
+ */
+export async function deleteAdicional(
+  spreadsheetId: string,
+  sheetRow: number,
+): Promise<void> {
+  const token = getToken()
+  if (!token) throw new Error('Sem token de autenticação')
+
+  const range = `_CONFIG!A${sheetRow}:D${sheetRow}`
+
+  const updateResponse = await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}?valueInputOption=RAW`,
+    {
+      method: 'PUT',
+      headers: {
+        Authorization: `Bearer ${token.access_token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ values: [['', '', '', '']] }),
+    },
+  )
+
+  if (!updateResponse.ok) {
+    throw new Error(`Erro ao remover adicional: ${updateResponse.status}`)
+  }
+}
+
 /* ────────── Recebimentos (pagamentos do cliente) ────────── */
 
 /**
@@ -377,15 +447,20 @@ export async function readRecebimentos(spreadsheetId: string): Promise<Recebimen
   const data = await response.json()
   const rows = (data.values ?? []) as string[][]
 
-  return rows
-    .filter((row) => row[0] || row[1])
-    .map((row) => ({
+  const result: RecebimentoRecord[] = []
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i]
+    if (!row?.[0] && !row?.[1]) continue
+    result.push({
       data: row[0] ?? '',
       valor: row[1] ?? '',
       valorCentavos: parseValorBR(row[1] ?? ''),
       descricao: row[2] ?? '',
       pdfLink: row[3] ?? '',
-    }))
+      sheetRow: 2 + i,
+    })
+  }
+  return result
 }
 
 /**
@@ -423,6 +498,76 @@ export async function appendRecebimento(
 
   if (!response.ok) {
     throw new Error(`Erro ao registrar recebimento: ${response.status}`)
+  }
+}
+
+/**
+ * Atualiza um recebimento existente na aba RECEBIMENTOS.
+ * @param sheetRow Linha na planilha (1-based), obtido de RecebimentoRecord.sheetRow
+ */
+export async function updateRecebimento(
+  spreadsheetId: string,
+  sheetRow: number,
+  data: Date,
+  valorCentavos: number,
+  descricao: string,
+  pdfLink: string,
+): Promise<void> {
+  const token = getToken()
+  if (!token) throw new Error('Sem token de autenticação')
+
+  await ensureRecebimentosTab(spreadsheetId)
+
+  const range = `RECEBIMENTOS!A${sheetRow}:D${sheetRow}`
+
+  const response = await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}?valueInputOption=USER_ENTERED`,
+    {
+      method: 'PUT',
+      headers: {
+        Authorization: `Bearer ${token.access_token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        values: [[formatDateBR(data), formatCurrency(valorCentavos), descricao || '', pdfLink || '']],
+      }),
+    },
+  )
+
+  if (!response.ok) {
+    throw new Error(`Erro ao atualizar recebimento: ${response.status}`)
+  }
+}
+
+/**
+ * Remove um recebimento da aba RECEBIMENTOS (limpa a linha).
+ * @param sheetRow Linha na planilha (1-based), obtido de RecebimentoRecord.sheetRow
+ */
+export async function deleteRecebimento(
+  spreadsheetId: string,
+  sheetRow: number,
+): Promise<void> {
+  const token = getToken()
+  if (!token) throw new Error('Sem token de autenticação')
+
+  await ensureRecebimentosTab(spreadsheetId)
+
+  const range = `RECEBIMENTOS!A${sheetRow}:D${sheetRow}`
+
+  const response = await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}?valueInputOption=RAW`,
+    {
+      method: 'PUT',
+      headers: {
+        Authorization: `Bearer ${token.access_token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ values: [['', '', '', '']] }),
+    },
+  )
+
+  if (!response.ok) {
+    throw new Error(`Erro ao remover recebimento: ${response.status}`)
   }
 }
 
@@ -472,14 +617,19 @@ export async function readPaymentHistory(
   const data = await response.json()
   const rows = (data.values ?? []) as string[][]
 
-  return rows
-    .filter((row) => row[0] || row[1])
-    .map((row) => ({
+  const result: PaymentRecord[] = []
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i]
+    if (!row?.[0] && !row?.[1]) continue
+    result.push({
       data: row[0] ?? '',
       valor: row[1] ?? '',
       valorCentavos: parseValorBR(row[1] ?? ''),
       descricao: row[2] ?? '',
-    }))
+      sheetRow: 2 + i,
+    })
+  }
+  return result
 }
 
 /* ────────── Registrar Pagamento de Funcionário ────────── */
@@ -515,6 +665,74 @@ export async function appendPayment(
 
   if (!response.ok) {
     throw new Error(`Erro ao registrar pagamento: ${response.status}`)
+  }
+}
+
+/**
+ * Atualiza um pagamento existente na aba do funcionário.
+ * @param tabName Nome da aba (nome do funcionário)
+ * @param sheetRow Linha na planilha (1-based), obtido de PaymentRecord.sheetRow
+ */
+export async function updatePayment(
+  spreadsheetId: string,
+  tabName: string,
+  sheetRow: number,
+  data: Date,
+  valorCentavos: number,
+  descricao: string,
+): Promise<void> {
+  const token = getToken()
+  if (!token) throw new Error('Sem token de autenticação')
+
+  const range = `${encodeURIComponent(tabName)}!A${sheetRow}:C${sheetRow}`
+
+  const response = await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${range}?valueInputOption=USER_ENTERED`,
+    {
+      method: 'PUT',
+      headers: {
+        Authorization: `Bearer ${token.access_token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        values: [[formatDateBR(data), formatCurrency(valorCentavos), descricao || '']],
+      }),
+    },
+  )
+
+  if (!response.ok) {
+    throw new Error(`Erro ao atualizar pagamento: ${response.status}`)
+  }
+}
+
+/**
+ * Remove um pagamento da aba do funcionário (limpa a linha).
+ * @param sheetRow Linha na planilha (1-based), obtido de PaymentRecord.sheetRow
+ */
+export async function deletePayment(
+  spreadsheetId: string,
+  tabName: string,
+  sheetRow: number,
+): Promise<void> {
+  const token = getToken()
+  if (!token) throw new Error('Sem token de autenticação')
+
+  const range = `${encodeURIComponent(tabName)}!A${sheetRow}:C${sheetRow}`
+
+  const response = await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${range}?valueInputOption=RAW`,
+    {
+      method: 'PUT',
+      headers: {
+        Authorization: `Bearer ${token.access_token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ values: [['', '', '']] }),
+    },
+  )
+
+  if (!response.ok) {
+    throw new Error(`Erro ao remover pagamento: ${response.status}`)
   }
 }
 

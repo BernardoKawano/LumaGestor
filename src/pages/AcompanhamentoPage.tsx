@@ -3,10 +3,13 @@
    Seleciona obra → verifica planilha → CreateSheet ou ManageSheet.
    ──────────────────────────────────────────── */
 
-import { useCallback, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
+import html2canvas from 'html2canvas'
+import { format } from 'date-fns'
 import { ObraSelector } from '../components/shared/ObraSelector'
 import { CreateSheetForm } from '../components/acompanhamento/CreateSheetForm'
 import { ManageSheet } from '../components/acompanhamento/ManageSheet'
+import { ResumoObra, type ResumoObraData } from '../components/acompanhamento/ResumoObra'
 import { findSheetInFolder } from '../services/google-drive'
 import type { Obra } from '../types'
 
@@ -19,9 +22,13 @@ type PageState =
 export function AcompanhamentoPage() {
   const [pageState, setPageState] = useState<PageState>({ view: 'select' })
   const [obra, setObra] = useState<Obra | null>(null)
+  const [summaryData, setSummaryData] = useState<ResumoObraData | null>(null)
+  const [capturing, setCapturing] = useState(false)
+  const resumoRef = useRef<HTMLDivElement>(null)
 
   const handleObraChange = useCallback(async (selectedObra: Obra) => {
     setObra(selectedObra)
+    setSummaryData(null)
     setPageState({ view: 'loading' })
 
     try {
@@ -51,15 +58,80 @@ export function AcompanhamentoPage() {
     [obra],
   )
 
+  const handleSummaryDataChange = useCallback((data: ResumoObraData) => {
+    setSummaryData(data)
+  }, [])
+
+  const handleGerarImagemResumo = useCallback(async () => {
+    const el = resumoRef.current
+    if (!el || !summaryData) return
+
+    setCapturing(true)
+    try {
+      const canvas = await html2canvas(el, {
+        scale: 2,
+        useCORS: true,
+        backgroundColor: '#ffffff',
+        logging: false,
+      })
+
+      const blob = await new Promise<Blob | null>((resolve) => {
+        canvas.toBlob(resolve, 'image/png')
+      })
+      if (!blob) throw new Error('Falha ao gerar imagem')
+
+      const safeName = summaryData.obraNome
+        .replace(/[^a-zA-Z0-9\u00C0-\u024F\s-]/g, '')
+        .replace(/\s+/g, '-')
+        .slice(0, 50)
+      const suggestedName = `resumo-${safeName}-${format(new Date(), 'yyyy-MM-dd-HHmm')}.png`
+
+      if ('showSaveFilePicker' in window) {
+        const handle = await (window as Window & { showSaveFilePicker: (o: unknown) => Promise<FileSystemFileHandle> })
+          .showSaveFilePicker({
+            suggestedName,
+            types: [{ description: 'Imagem PNG', accept: { 'image/png': ['.png'] } }],
+          })
+        const writable = await handle.createWritable()
+        await writable.write(blob)
+        await writable.close()
+      } else {
+        const url = URL.createObjectURL(blob)
+        const link = document.createElement('a')
+        link.href = url
+        link.download = suggestedName
+        link.click()
+        URL.revokeObjectURL(url)
+      }
+    } catch (err) {
+      if ((err as Error).name === 'AbortError') return
+      console.error('Erro ao gerar imagem:', err)
+    } finally {
+      setCapturing(false)
+    }
+  }, [summaryData])
+
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div>
-        <h1 className="text-xl font-semibold text-gray-900">Acompanhamento de Obras</h1>
-        <p className="mt-1 text-sm text-gray-500">
-          Gerencie pagamentos de funcionários por obra
-        </p>
-      </div>
+    <div className="relative">
+      {/* Resumo oculto para exportação (renderizado off-screen) */}
+      {summaryData && (
+        <div
+          ref={resumoRef}
+          className="fixed left-[-9999px] top-0 z-[-1]"
+          aria-hidden
+        >
+          <ResumoObra data={summaryData} />
+        </div>
+      )}
+
+      <div className="space-y-6">
+        {/* Header */}
+        <div>
+          <h1 className="text-xl font-semibold text-gray-900">Acompanhamento de Obras</h1>
+          <p className="mt-1 text-sm text-gray-500">
+            Gerencie pagamentos de funcionários por obra
+          </p>
+        </div>
 
       {/* Seletor de obra (sempre visível no topo) */}
       <div className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
@@ -102,7 +174,36 @@ export function AcompanhamentoPage() {
         <ManageSheet
           spreadsheetId={pageState.spreadsheetId}
           obraNome={pageState.obra.nome}
+          onSummaryDataChange={handleSummaryDataChange}
         />
+      )}
+      </div>
+
+      {/* Botão para gerar imagem resumo */}
+      {pageState.view === 'manage' && (
+        <button
+          type="button"
+          onClick={handleGerarImagemResumo}
+          disabled={capturing || !summaryData}
+          className="fixed bottom-6 right-6 z-50 flex items-center gap-2 rounded-full bg-green-600 px-5 py-3 text-sm font-medium text-white shadow-lg transition-all hover:bg-green-700 hover:shadow-xl disabled:opacity-70"
+          title="Gerar imagem resumo e escolher onde salvar"
+        >
+          {capturing ? (
+            <>
+              <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
+              Gerando...
+            </>
+          ) : (
+            <>
+              <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M19 13v7a2 2 0 01-2 2H7a2 2 0 01-2-2v-7" />
+              </svg>
+              Gerar resumo (.png)
+            </>
+          )}
+        </button>
       )}
     </div>
   )

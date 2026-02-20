@@ -27,3 +27,24 @@ export function formatDateISO(date: Date): string {
 export function formatDateBR(date: Date): string {
   return format(date, 'dd/MM/yyyy')
 }
+
+/**
+ * Converte "DD/MM/YYYY" → Date.
+ * Retorna null se inválido.
+ */
+export function parseDateBR(str: string): Date | null {
+  if (!str || !/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(str.trim())) return null
+  const parts = str.trim().split('/').map(Number)
+  const [d, m, y] = parts
+  const date = new Date(y, m - 1, d)
+  return isNaN(date.getTime()) ? null : date
+}
+
+/**
+ * Converte "DD/MM/YYYY" → "YYYY-MM-DD" para input type="date".
+ */
+export function dateBRToISO(str: string): string {
+  const d = parseDateBR(str)
+  if (!d) return ''
+  return format(d, 'yyyy-MM-dd')
+}
