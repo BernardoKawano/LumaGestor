@@ -57,8 +57,8 @@ export function ManageSheet({ spreadsheetId, obraNome, onSummaryDataChange }: Pr
   const [addValor, setAddValor] = useState(0)
   const [addingAdicional, setAddingAdicional] = useState(false)
 
-  // Tab do painel financeiro
-  const [finTab, setFinTab] = useState<'adicionais' | 'recebimentos'>('recebimentos')
+  // Tab do painel financeiro (adicionais em primeiro para facilitar acrescentar valor ao total)
+  const [finTab, setFinTab] = useState<'adicionais' | 'recebimentos'>('adicionais')
 
   // Edição inline
   const [editingRecebimento, setEditingRecebimento] = useState<number | null>(null)
@@ -298,9 +298,22 @@ export function ManageSheet({ spreadsheetId, obraNome, onSummaryDataChange }: Pr
         <div className="flex items-center justify-between">
           <div>
             <h2 className="text-lg font-semibold text-gray-900">{obraNome}</h2>
-            <p className="mt-0.5 text-sm text-gray-500">
-              Valor total: {formatCurrency(config?.valorTotalObra ?? 0)}
-            </p>
+            <div className="mt-0.5 text-sm text-gray-500">
+              <span>
+                Valor total da obra:{' '}
+                <strong className="text-gray-900">
+                  {formatCurrency(financial?.totalGeral ?? config?.valorTotalObra ?? 0)}
+                </strong>
+              </span>
+              {financial && financial.totalAdicionais > 0 && (
+                <span className="ml-2 text-gray-400">
+                  (base: {formatCurrency(financial.valorOriginal)} + adicionais)
+                </span>
+              )}
+              <p className="mt-1 text-xs text-gray-400">
+                Para acrescentar valores ao total, use a aba <strong>Adicionais</strong> no painel financeiro abaixo.
+              </p>
+            </div>
           </div>
           <a
             href={`https://docs.google.com/spreadsheets/d/${spreadsheetId}`}
