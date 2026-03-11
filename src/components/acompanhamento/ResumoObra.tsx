@@ -10,14 +10,34 @@ import type {
   ObraFinancialSummary,
   RecebimentoRecord,
   ObraSheetConfig,
+  PaymentRecord,
 } from '../../services/google-sheets-obras'
+
+/** Rascunho de recebimento (não persiste na planilha até confirmar) */
+export interface RascunhoRecebimento {
+  id: string
+  data: string        // YYYY-MM-DD
+  valorCentavos: number
+  descricao: string
+}
+
+/** Rascunho de pagamento de funcionário (não persiste na planilha até confirmar) */
+export interface RascunhoPagamento {
+  id: string
+  data: string        // YYYY-MM-DD
+  valorCentavos: number
+  descricao: string
+}
 
 export interface ResumoObraData {
   obraNome: string
   financial: ObraFinancialSummary | null
   recebimentos: RecebimentoRecord[]
+  rascunhosRecebimento?: RascunhoRecebimento[]
   config: ObraSheetConfig | null
   summaries: FuncionarioSummary[]
+  pagamentosPorFuncionario: Record<string, PaymentRecord[]>
+  rascunhosPagamentoPorFuncionario?: Record<string, RascunhoPagamento[]>
 }
 
 interface Props {
@@ -25,8 +45,10 @@ interface Props {
 }
 
 export function ResumoObra({ data }: Props) {
-  const { obraNome, financial, recebimentos, config, summaries } = data
+  const { obraNome, financial, recebimentos, rascunhosRecebimento = [], config, summaries, pagamentosPorFuncionario, rascunhosPagamentoPorFuncionario = {} } = data
   const adicionais = config?.adicionais ?? []
+  const totalRascunhos = rascunhosRecebimento.reduce((a, r) => a + r.valorCentavos, 0)
+  const totalRecebimentosComRascunhos = recebimentos.reduce((a, r) => a + r.valorCentavos, 0) + totalRascunhos
 
   return (
     <div
@@ -65,9 +87,9 @@ export function ResumoObra({ data }: Props) {
           <MetricBox label="Adicionais" value={financial.totalAdicionais} accent="#b45309" />
           <MetricBox label="Total Geral" value={financial.totalGeral} accent="#1d4ed8" bold />
           <MetricBox
-            label="Saldo Devedor"
-            value={financial.saldoDevedor}
-            accent={financial.saldoDevedor <= 0 ? '#15803d' : '#dc2626'}
+            label={totalRascunhos > 0 ? 'Saldo (c/ rascunhos)' : 'Saldo Devedor'}
+            value={financial.totalGeral - totalRecebimentosComRascunhos}
+            accent={(financial.totalGeral - totalRecebimentosComRascunhos) <= 0 ? '#15803d' : '#dc2626'}
             bold
           />
         </div>
@@ -75,7 +97,7 @@ export function ResumoObra({ data }: Props) {
 
       {/* Recebimentos */}
       <Section title="Recebimentos">
-        {recebimentos.length === 0 ? (
+        {recebimentos.length === 0 && rascunhosRecebimento.length === 0 ? (
           <p style={{ margin: 0, color: '#9ca3af', fontSize: 12 }}>Nenhum recebimento</p>
         ) : (
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
@@ -87,19 +109,36 @@ export function ResumoObra({ data }: Props) {
               </tr>
             </thead>
             <tbody>
-              {recebimentos.map((r, i) => (
-                <tr key={r.sheetRow} style={{ borderBottom: i < recebimentos.length - 1 ? '1px solid #f3f4f6' : undefined }}>
+              {recebimentos.map((r) => (
+                <tr key={`rec-${r.sheetRow}`} style={{ borderBottom: '1px solid #f3f4f6' }}>
                   <td style={tdStyle}>{r.data}</td>
                   <td style={{ ...tdStyle, fontFamily: 'monospace' }}>{r.valor}</td>
                   <td style={tdStyle}>{r.descricao}</td>
                 </tr>
               ))}
+              {rascunhosRecebimento.map((r) => {
+                const dataBR = /^\d{4}-\d{2}-\d{2}$/.test(r.data)
+                  ? `${r.data.slice(8, 10)}/${r.data.slice(5, 7)}/${r.data.slice(0, 4)}`
+                  : r.data
+                return (
+                  <tr key={r.id} style={{ borderBottom: '1px solid #f3f4f6', backgroundColor: '#fffbeb' }}>
+                    <td style={tdStyle}>{dataBR} <span style={{ fontSize: 10, color: '#b45309' }}>(rascunho)</span></td>
+                    <td style={{ ...tdStyle, fontFamily: 'monospace' }}>{formatCurrency(r.valorCentavos)}</td>
+                    <td style={tdStyle}>{r.descricao || 'Rascunho'}</td>
+                  </tr>
+                )
+              })}
             </tbody>
             <tfoot>
               <tr style={{ backgroundColor: '#f9fafb', fontWeight: 600 }}>
                 <td style={tdStyle}>Total</td>
                 <td style={tdStyle}>
-                  {formatCurrency(recebimentos.reduce((a, r) => a + r.valorCentavos, 0))}
+                  {formatCurrency(totalRecebimentosComRascunhos)}
+                  {totalRascunhos > 0 && (
+                    <span style={{ fontSize: 10, color: '#b45309', marginLeft: 6 }}>
+                      (incl. rascunhos)
+                    </span>
+                  )}
                 </td>
                 <td style={tdStyle} />
               </tr>
@@ -160,47 +199,144 @@ export function ResumoObra({ data }: Props) {
               </tr>
             </thead>
             <tbody>
-              {summaries.map((s) => (
-                <tr key={s.nome} style={{ borderBottom: '1px solid #f3f4f6' }}>
-                  <td style={tdStyle}>{s.nome}</td>
-                  <td style={{ ...tdStyle, fontFamily: 'monospace' }}>
-                    {formatCurrency(s.totalPago)}
-                  </td>
-                  <td style={{ ...tdStyle, fontFamily: 'monospace' }}>
-                    {formatCurrency(s.valorEsperado)}
-                  </td>
-                  <td style={tdStyle}>
-                    <span
-                      style={{
-                        padding: '2px 8px',
-                        borderRadius: 4,
-                        fontSize: 11,
-                        fontWeight: 600,
-                        backgroundColor:
-                          s.saldoRestante < 0
-                            ? '#fef2f2'
-                            : s.saldoRestante === 0
-                              ? '#f0fdf4'
-                              : '#f9fafb',
-                        color:
-                          s.saldoRestante < 0
-                            ? '#dc2626'
-                            : s.saldoRestante === 0
-                              ? '#15803d'
-                              : '#6b7280',
-                      }}
-                    >
-                      {s.saldoRestante < 0
-                        ? `Excedido ${formatCurrency(Math.abs(s.saldoRestante))}`
-                        : s.saldoRestante === 0
-                          ? 'Quitado'
-                          : `Restante: ${formatCurrency(s.saldoRestante)}`}
-                    </span>
-                  </td>
-                </tr>
-              ))}
+              {summaries.map((s) => {
+                const rascunhos = rascunhosPagamentoPorFuncionario[s.nome] ?? []
+                const totalRascunhos = rascunhos.reduce((a, r) => a + r.valorCentavos, 0)
+                const totalPagoComRascunhos = s.totalPago + totalRascunhos
+                const saldoComRascunhos = s.valorEsperado - totalPagoComRascunhos
+                return (
+                  <tr key={s.nome} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                    <td style={tdStyle}>{s.nome}</td>
+                    <td style={{ ...tdStyle, fontFamily: 'monospace' }}>
+                      {formatCurrency(totalPagoComRascunhos)}
+                      {totalRascunhos > 0 && (
+                        <span style={{ fontSize: 10, color: '#b45309', marginLeft: 4 }}>(incl. rascunhos)</span>
+                      )}
+                    </td>
+                    <td style={{ ...tdStyle, fontFamily: 'monospace' }}>
+                      {formatCurrency(s.valorEsperado)}
+                    </td>
+                    <td style={tdStyle}>
+                      <span
+                        style={{
+                          padding: '2px 8px',
+                          borderRadius: 4,
+                          fontSize: 11,
+                          fontWeight: 600,
+                          backgroundColor:
+                            saldoComRascunhos < 0
+                              ? '#fef2f2'
+                              : saldoComRascunhos === 0
+                                ? '#f0fdf4'
+                                : '#f9fafb',
+                          color:
+                            saldoComRascunhos < 0
+                              ? '#dc2626'
+                              : saldoComRascunhos === 0
+                                ? '#15803d'
+                                : '#6b7280',
+                        }}
+                      >
+                        {saldoComRascunhos < 0
+                          ? `Excedido ${formatCurrency(Math.abs(saldoComRascunhos))}`
+                          : saldoComRascunhos === 0
+                            ? 'Quitado'
+                            : `Restante: ${formatCurrency(saldoComRascunhos)}`}
+                      </span>
+                    </td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
+        )}
+      </Section>
+
+      {/* Pagamentos por colaborador */}
+      <Section title="Pagamentos por colaborador">
+        {summaries.length === 0 ? (
+          <p style={{ margin: 0, color: '#9ca3af', fontSize: 12 }}>Nenhum funcionário</p>
+        ) : (
+          <div style={{ padding: 10 }}>
+            {summaries.map((summary, index) => {
+              const pagamentos = pagamentosPorFuncionario[summary.nome] ?? []
+              const rascunhos = rascunhosPagamentoPorFuncionario[summary.nome] ?? []
+              const totalPago = pagamentos.reduce((acc, p) => acc + p.valorCentavos, 0)
+              const totalRascunhos = rascunhos.reduce((acc, r) => acc + r.valorCentavos, 0)
+              const totalGeral = totalPago + totalRascunhos
+              const temItens = pagamentos.length > 0 || rascunhos.length > 0
+
+              return (
+                <div
+                  key={summary.nome}
+                  style={{
+                    border: '1px solid #e5e7eb',
+                    borderRadius: 8,
+                    marginBottom: index < summaries.length - 1 ? 10 : 0,
+                    overflow: 'hidden',
+                  }}
+                >
+                  <div
+                    style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      padding: '8px 10px',
+                      backgroundColor: '#f9fafb',
+                    }}
+                  >
+                    <strong style={{ fontSize: 12 }}>{summary.nome}</strong>
+                    <span style={{ fontSize: 11, color: '#6b7280' }}>
+                      Total pago: {formatCurrency(totalGeral)}
+                      {totalRascunhos > 0 && (
+                        <span style={{ color: '#b45309', marginLeft: 4 }}>(incl. {rascunhos.length} rascunho{rascunhos.length > 1 ? 's' : ''})</span>
+                      )}
+                    </span>
+                  </div>
+
+                  {!temItens ? (
+                    <p style={{ margin: 0, padding: '10px', color: '#9ca3af', fontSize: 12 }}>
+                      Nenhum pagamento registrado
+                    </p>
+                  ) : (
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                      <thead>
+                        <tr style={{ backgroundColor: '#ffffff' }}>
+                          <th style={thStyle}>Data</th>
+                          <th style={thStyle}>Valor</th>
+                          <th style={thStyle}>Descrição</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {pagamentos.map((p, i) => (
+                          <tr
+                            key={`${summary.nome}-${p.sheetRow ?? i}`}
+                            style={{ borderBottom: '1px solid #f3f4f6' }}
+                          >
+                            <td style={tdStyle}>{p.data}</td>
+                            <td style={{ ...tdStyle, fontFamily: 'monospace' }}>{p.valor}</td>
+                            <td style={tdStyle}>{p.descricao || '-'}</td>
+                          </tr>
+                        ))}
+                        {rascunhos.map((r) => {
+                          const dataBR = /^\d{4}-\d{2}-\d{2}$/.test(r.data)
+                            ? `${r.data.slice(8, 10)}/${r.data.slice(5, 7)}/${r.data.slice(0, 4)}`
+                            : r.data
+                          return (
+                            <tr key={r.id} style={{ borderBottom: '1px solid #f3f4f6', backgroundColor: '#fffbeb' }}>
+                              <td style={tdStyle}>{dataBR} <span style={{ fontSize: 10, color: '#b45309' }}>(rascunho)</span></td>
+                              <td style={{ ...tdStyle, fontFamily: 'monospace' }}>{formatCurrency(r.valorCentavos)}</td>
+                              <td style={tdStyle}>{r.descricao || 'Rascunho'}</td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+              )
+            })}
+          </div>
         )}
       </Section>
     </div>

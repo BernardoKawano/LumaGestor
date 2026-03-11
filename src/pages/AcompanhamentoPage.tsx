@@ -4,6 +4,7 @@
    ──────────────────────────────────────────── */
 
 import { useCallback, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import html2canvas from 'html2canvas'
 import { format } from 'date-fns'
 import { ObraSelector } from '../components/shared/ObraSelector'
@@ -20,6 +21,7 @@ type PageState =
   | { view: 'manage'; obra: Obra; spreadsheetId: string }
 
 export function AcompanhamentoPage() {
+  const navigate = useNavigate()
   const [pageState, setPageState] = useState<PageState>({ view: 'select' })
   const [obra, setObra] = useState<Obra | null>(null)
   const [summaryData, setSummaryData] = useState<ResumoObraData | null>(null)
@@ -174,7 +176,9 @@ export function AcompanhamentoPage() {
         <ManageSheet
           spreadsheetId={pageState.spreadsheetId}
           obraNome={pageState.obra.nome}
+          obra={pageState.obra}
           onSummaryDataChange={handleSummaryDataChange}
+          onCriarSolicitacao={(obra) => navigate('/wizard', { state: { obra } })}
         />
       )}
       </div>

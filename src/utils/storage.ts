@@ -15,6 +15,7 @@ const META_FILENAME = '_luma-meta.json'
 export interface ObraMeta {
   clientes: string
   projeto: string
+  email?: string
 }
 
 /* ────────── localStorage ────────── */
@@ -92,6 +93,7 @@ export async function getObraMetaDrive(folderId: string): Promise<ObraMeta | nul
       const meta: ObraMeta = {
         clientes: data.clientes,
         projeto: data.projeto ?? '',
+        email: typeof data.email === 'string' ? data.email : undefined,
       }
       // Cachear no localStorage para próxima vez ser instantâneo
       saveObraMetaLocal(folderId, meta)
