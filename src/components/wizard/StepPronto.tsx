@@ -4,6 +4,7 @@
    ──────────────────────────────────────────── */
 
 import { useCallback, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useWizardContext } from '../../hooks/useWizard'
 import { ModalMarcarPaga } from '../modals/ModalMarcarPaga'
 import { TEMPLATE } from '../../config/template'
@@ -12,6 +13,7 @@ import { formatCurrency } from '../../utils/currency'
 import { calcTotalGeral } from '../../types'
 
 export function StepPronto() {
+  const navigate = useNavigate()
   const { state, dispatch } = useWizardContext()
   const s = state.solicitacao
   const [modalPaga, setModalPaga] = useState(false)
@@ -121,6 +123,19 @@ export function StepPronto() {
               {copiado ? 'Copiado!' : 'Copiar texto do e-mail'}
             </span>
           </button>
+
+          {/* Ir para acompanhamento da obra */}
+          {s.obra && (
+            <button
+              onClick={() => navigate('/acompanhamento', { state: { obra: s.obra } })}
+              className="flex w-full items-center gap-3 rounded-lg border border-gray-100 px-4 py-3 text-left transition-colors hover:bg-gray-50"
+            >
+              <svg className="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15 10.5V6.75A2.25 2.25 0 0012.75 4.5h-7.5A2.25 2.25 0 003 6.75v10.5A2.25 2.25 0 005.25 19.5h7.5A2.25 2.25 0 0015 17.25V13.5m3-3l3 3m0 0l-3 3m3-3H9" />
+              </svg>
+              <span className="text-sm text-gray-700">Abrir acompanhamento desta obra</span>
+            </button>
+          )}
 
           {/* Marcar como enviada */}
           {s.status === 'gerada' && (

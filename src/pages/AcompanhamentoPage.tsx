@@ -3,8 +3,8 @@
    Seleciona obra → verifica planilha → CreateSheet ou ManageSheet.
    ──────────────────────────────────────────── */
 
-import { useCallback, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
 import html2canvas from 'html2canvas'
 import { format } from 'date-fns'
 import { ObraSelector } from '../components/shared/ObraSelector'
@@ -22,11 +22,14 @@ type PageState =
 
 export function AcompanhamentoPage() {
   const navigate = useNavigate()
+  const location = useLocation()
   const [pageState, setPageState] = useState<PageState>({ view: 'select' })
   const [obra, setObra] = useState<Obra | null>(null)
   const [summaryData, setSummaryData] = useState<ResumoObraData | null>(null)
   const [capturing, setCapturing] = useState(false)
   const resumoRef = useRef<HTMLDivElement>(null)
+  const initialObraHandledRef = useRef(false)
+  const initialObra = (location.state as { obra?: Obra } | null)?.obra ?? null
 
   const handleObraChange = useCallback(async (selectedObra: Obra) => {
     setObra(selectedObra)
@@ -88,22 +91,46 @@ export function AcompanhamentoPage() {
         .slice(0, 50)
       const suggestedName = `resumo-${safeName}-${format(new Date(), 'yyyy-MM-dd-HHmm')}.png`
 
+      const ClipboardItemCtor = (window as Window & { ClipboardItem?: typeof ClipboardItem }).ClipboardItem
+      if (ClipboardItemCtor && navigator.clipboard?.write) {
+        try {
+          await navigator.clipboard.write([
+            new ClipboardItemCtor({ 'image/png': blob }),
+          ])
+        } catch (clipboardErr) {
+          console.warn('Nao foi possivel copiar imagem para clipboard:', clipboardErr)
+        }
+      }
+
+      let saved = false
+
       if ('showSaveFilePicker' in window) {
-        const handle = await (window as Window & { showSaveFilePicker: (o: unknown) => Promise<FileSystemFileHandle> })
-          .showSaveFilePicker({
-            suggestedName,
-            types: [{ description: 'Imagem PNG', accept: { 'image/png': ['.png'] } }],
-          })
-        const writable = await handle.createWritable()
-        await writable.write(blob)
-        await writable.close()
-      } else {
+        try {
+          const handle = await (window as Window & { showSaveFilePicker: (o: unknown) => Promise<FileSystemFileHandle> })
+            .showSaveFilePicker({
+              suggestedName,
+              types: [{ description: 'Imagem PNG', accept: { 'image/png': ['.png'] } }],
+            })
+          const writable = await handle.createWritable()
+          await writable.write(blob)
+          await writable.close()
+          saved = true
+        } catch (saveErr) {
+          if ((saveErr as Error).name !== 'AbortError') {
+            console.warn('Falha ao salvar com seletor nativo, tentando download:', saveErr)
+          }
+        }
+      }
+
+      if (!saved) {
         const url = URL.createObjectURL(blob)
         const link = document.createElement('a')
         link.href = url
         link.download = suggestedName
+        document.body.appendChild(link)
         link.click()
-        URL.revokeObjectURL(url)
+        link.remove()
+        setTimeout(() => URL.revokeObjectURL(url), 1000)
       }
     } catch (err) {
       if ((err as Error).name === 'AbortError') return
@@ -112,6 +139,12 @@ export function AcompanhamentoPage() {
       setCapturing(false)
     }
   }, [summaryData])
+
+  useEffect(() => {
+    if (!initialObra || initialObraHandledRef.current) return
+    initialObraHandledRef.current = true
+    void handleObraChange(initialObra)
+  }, [initialObra, handleObraChange])
 
   return (
     <div className="relative">
