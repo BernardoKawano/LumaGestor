@@ -23,3 +23,151 @@ body {
 .tabular-nums {
   font-variant-numeric: tabular-nums;
 }
+
+/* ── Home: demos animados do fluxo (wizard → kanban → planilha) ── */
+@keyframes home-wizard-step {
+  0%,
+  100% {
+    border-color: #e5e7eb;
+    box-shadow: none;
+    transform: scale(1);
+  }
+  12% {
+    border-color: #1f2937;
+    box-shadow: 0 0 0 3px rgba(17, 24, 39, 0.1);
+    transform: scale(1.06);
+  }
+  35%,
+  70% {
+    border-color: #e5e7eb;
+    box-shadow: none;
+    transform: scale(1);
+  }
+}
+
+@keyframes home-wizard-connector {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scaleX(0.88);
+  }
+  12% {
+    opacity: 1;
+    transform: scaleX(1);
+  }
+  35%,
+  70% {
+    opacity: 0.35;
+    transform: scaleX(0.88);
+  }
+}
+
+@keyframes home-pdf-pop {
+  0%,
+  78% {
+    transform: scale(1);
+  }
+  86% {
+    transform: scale(1.05);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes home-kanban-card {
+  0%,
+  10% {
+    left: 6%;
+  }
+  30%,
+  40% {
+    left: 37%;
+  }
+  55%,
+  65% {
+    left: 68%;
+  }
+  88%,
+  100% {
+    left: 6%;
+  }
+}
+
+@keyframes home-sheet-bar {
+  0%,
+  12% {
+    width: 0%;
+  }
+  32%,
+  58% {
+    width: 92%;
+  }
+  82%,
+  100% {
+    width: 0%;
+  }
+}
+
+@keyframes home-sheet-fade-out {
+  0%,
+  38% {
+    opacity: 1;
+  }
+  45%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes home-sheet-fade-in {
+  0%,
+  38% {
+    opacity: 0;
+  }
+  45%,
+  100% {
+    opacity: 1;
+  }
+}
+
+.home-demo-wizard-step {
+  animation: home-wizard-step 2.75s ease-in-out infinite;
+}
+
+.home-demo-wizard-connector {
+  animation: home-wizard-connector 2.75s ease-in-out infinite;
+  transform-origin: center left;
+}
+
+.home-demo-pdf-pop {
+  animation: home-pdf-pop 2.75s ease-in-out infinite;
+}
+
+.home-demo-kanban-card {
+  animation: home-kanban-card 5.5s ease-in-out infinite;
+}
+
+.home-demo-sheet-bar {
+  animation: home-sheet-bar 4s ease-in-out infinite;
+}
+
+.home-demo-sheet-val-a {
+  animation: home-sheet-fade-out 4s ease-in-out infinite;
+}
+
+.home-demo-sheet-val-b {
+  animation: home-sheet-fade-in 4s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .home-demo-wizard-step,
+  .home-demo-wizard-connector,
+  .home-demo-pdf-pop,
+  .home-demo-kanban-card,
+  .home-demo-sheet-bar,
+  .home-demo-sheet-val-a,
+  .home-demo-sheet-val-b {
+    animation: none !important;
+  }
+}
