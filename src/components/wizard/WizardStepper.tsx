@@ -26,7 +26,7 @@ export function WizardStepper({ currentStep }: Props) {
             {i > 0 && (
               <div
                 className={`h-px w-12 sm:w-20 ${
-                  isDone ? 'bg-gray-900' : 'bg-gray-200'
+                  isDone ? 'bg-gray-900 dark:bg-gray-100' : 'bg-gray-200 dark:bg-gray-600'
                 }`}
               />
             )}
@@ -36,10 +36,10 @@ export function WizardStepper({ currentStep }: Props) {
               <div
                 className={`flex h-8 w-8 items-center justify-center rounded-full text-xs font-semibold transition-colors ${
                   isActive
-                    ? 'bg-gray-900 text-white'
+                    ? 'bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900'
                     : isDone
-                      ? 'bg-gray-900 text-white'
-                      : 'border-2 border-gray-200 text-gray-400'
+                      ? 'bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900'
+                      : 'border-2 border-gray-200 text-gray-400 dark:border-gray-600 dark:text-gray-500'
                 }`}
               >
                 {isDone ? (
@@ -52,7 +52,7 @@ export function WizardStepper({ currentStep }: Props) {
               </div>
               <span
                 className={`text-xs font-medium ${
-                  isActive ? 'text-gray-900' : 'text-gray-400'
+                  isActive ? 'text-gray-900 dark:text-gray-100' : 'text-gray-400 dark:text-gray-500'
                 }`}
               >
                 {step.label}

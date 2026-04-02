@@ -48,7 +48,7 @@ export function CurrencyInput({
 
   return (
     <div className={`relative ${className}`}>
-      <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-gray-400">
+      <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-gray-400 dark:text-gray-500">
         R$
       </span>
       <input
@@ -58,7 +58,7 @@ export function CurrencyInput({
         onChange={handleChange}
         onBlur={handleBlur}
         placeholder={placeholder}
-        className={`w-full rounded-lg border py-2.5 pl-10 pr-4 text-right font-mono text-sm tabular-nums transition-colors placeholder:text-gray-300 focus:outline-none focus:ring-2 ${
+        className={`w-full rounded-lg border bg-white py-2.5 pl-10 pr-4 text-right font-mono text-sm tabular-nums transition-colors placeholder:text-gray-300 focus:outline-none focus:ring-2 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:focus:ring-gray-600 ${
           error
             ? 'border-red-300 focus:ring-red-200'
             : 'border-gray-200 focus:ring-gray-200'

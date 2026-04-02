@@ -35,12 +35,12 @@ export function StepItens() {
   return (
     <div className="space-y-6">
       {/* ── Serviço ── */}
-      <div className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
-        <h2 className="mb-5 text-lg font-semibold text-gray-900">Serviço</h2>
+      <div className="w-full rounded-2xl border border-gray-100 bg-white p-6 shadow-sm dark:border-gray-700 dark:bg-gray-900 sm:p-8">
+        <h2 className="mb-5 text-lg font-semibold text-gray-900 dark:text-gray-100">Serviço</h2>
 
         <div className="space-y-4">
           <div>
-            <label className="mb-1.5 block text-sm font-medium text-gray-500">
+            <label className="mb-1.5 block text-sm font-medium text-gray-500 dark:text-gray-400">
               Empresa / Loja
             </label>
             <input
@@ -49,12 +49,12 @@ export function StepItens() {
               onChange={(e) =>
                 dispatch({ type: 'SET_SERVICO_EMPRESA', empresa: e.target.value })
               }
-              className="w-full rounded-lg border border-gray-200 px-3 py-2.5 text-sm text-gray-900 placeholder:text-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-200"
+              className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-900 placeholder:text-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-200 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:focus:ring-gray-600"
             />
           </div>
 
           <div>
-            <label className="mb-1.5 block text-sm font-medium text-gray-500">
+            <label className="mb-1.5 block text-sm font-medium text-gray-500 dark:text-gray-400">
               Valor do serviço
             </label>
             <CurrencyInput
@@ -67,25 +67,25 @@ export function StepItens() {
       </div>
 
       {/* ── Adicionais ── */}
-      <div className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
+      <div className="w-full rounded-2xl border border-gray-100 bg-white p-6 shadow-sm dark:border-gray-700 dark:bg-gray-900 sm:p-8">
         <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-gray-900">Adicionais</h2>
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Adicionais</h2>
           <button
             onClick={() => dispatch({ type: 'ADD_ADICIONAL' })}
-            className="rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 transition-colors hover:bg-gray-50"
+            className="rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-800"
           >
             + Adicional
           </button>
         </div>
 
         {s.adicionais.length === 0 ? (
-          <p className="text-sm text-gray-300">Nenhum adicional. Clique em "+ Adicional" para incluir.</p>
+          <p className="text-sm text-gray-300 dark:text-gray-500">Nenhum adicional. Clique em "+ Adicional" para incluir.</p>
         ) : (
           <div className="space-y-3">
             {s.adicionais.map((ad) => (
               <div
                 key={ad.id}
-                className="flex items-start gap-3 rounded-lg border border-gray-100 bg-gray-50/50 p-3"
+                className="flex items-start gap-3 rounded-lg border border-gray-100 bg-gray-50/50 p-3 dark:border-gray-700 dark:bg-gray-800/50"
               >
                 <div className="flex-1 space-y-2">
                   <input
@@ -100,7 +100,7 @@ export function StepItens() {
                       })
                     }
                     placeholder="Nome / descrição"
-                    className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm placeholder:text-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-200"
+                    className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm placeholder:text-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-200 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:focus:ring-gray-600"
                   />
                   <CurrencyInput
                     value={ad.valor}
@@ -130,8 +130,8 @@ export function StepItens() {
       </div>
 
       {/* ── Reembolsos ── */}
-      <div className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
-        <h2 className="mb-4 text-lg font-semibold text-gray-900">Notas de Reembolso</h2>
+      <div className="w-full rounded-2xl border border-gray-100 bg-white p-6 shadow-sm dark:border-gray-700 dark:bg-gray-900 sm:p-8">
+        <h2 className="mb-4 text-lg font-semibold text-gray-900 dark:text-gray-100">Notas de Reembolso</h2>
 
         <FileDropzone
           onFilesAdded={(files) => {
@@ -144,7 +144,7 @@ export function StepItens() {
             {s.reembolsos.map((r, i) => (
               <div
                 key={r.id}
-                className="flex items-center gap-3 rounded-lg border border-gray-100 bg-gray-50/50 p-3"
+                className="flex items-center gap-3 rounded-lg border border-gray-100 bg-gray-50/50 p-3 dark:border-gray-700 dark:bg-gray-800/50"
               >
                 <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-red-50">
                   <svg className="h-4 w-4 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -153,7 +153,7 @@ export function StepItens() {
                 </div>
 
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm text-gray-700">{r.nomeOriginal}</p>
+                  <p className="truncate text-sm text-gray-700 dark:text-gray-200">{r.nomeOriginal}</p>
                 </div>
 
                 <CurrencyInput
@@ -191,13 +191,13 @@ export function StepItens() {
       <div className="flex items-center justify-between">
         <button
           onClick={handleVoltar}
-          className="rounded-lg border border-gray-200 px-5 py-2.5 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-50"
+          className="rounded-lg border border-gray-200 px-5 py-2.5 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-800"
         >
           Voltar
         </button>
         <button
           onClick={handleContinuar}
-          className="rounded-lg bg-gray-900 px-6 py-3 text-sm font-medium text-white transition-colors hover:bg-gray-800"
+          className="rounded-lg bg-gray-900 px-6 py-3 text-sm font-medium text-white transition-colors hover:bg-gray-800 dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-white"
         >
           Continuar
         </button>

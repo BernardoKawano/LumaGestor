@@ -48,8 +48,8 @@ export function StepIdentificacao() {
   return (
     <div className="space-y-6">
       {/* Card principal */}
-      <div className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
-        <h2 className="mb-6 text-lg font-semibold text-gray-900">Identificação</h2>
+      <div className="w-full rounded-2xl border border-gray-100 bg-white p-6 shadow-sm dark:border-gray-700 dark:bg-gray-900 sm:p-8">
+        <h2 className="mb-6 text-lg font-semibold text-gray-900 dark:text-gray-100">Identificação</h2>
 
         <div className="space-y-5">
           {/* Obra */}
@@ -61,7 +61,7 @@ export function StepIdentificacao() {
 
           {/* Clientes */}
           <div>
-            <label className="mb-1.5 block text-sm font-medium text-gray-500">
+            <label className="mb-1.5 block text-sm font-medium text-gray-500 dark:text-gray-400">
               Clientes
             </label>
             <input
@@ -71,10 +71,10 @@ export function StepIdentificacao() {
                 dispatch({ type: 'SET_FIELD', field: 'clientes', value: e.target.value })
               }
               placeholder="Nome do cliente"
-              className={`w-full rounded-lg border px-3 py-2.5 text-sm text-gray-900 transition-colors placeholder:text-gray-300 focus:outline-none focus:ring-2 ${
+              className={`w-full rounded-lg border bg-white px-3 py-2.5 text-sm text-gray-900 transition-colors placeholder:text-gray-300 focus:outline-none focus:ring-2 dark:bg-gray-800 dark:text-gray-100 dark:placeholder:text-gray-500 ${
                 state.errors.clientes
                   ? 'border-red-300 focus:ring-red-200'
-                  : 'border-gray-200 focus:ring-gray-200'
+                  : 'border-gray-200 focus:ring-gray-200 dark:border-gray-600 dark:focus:ring-gray-600'
               }`}
             />
             {state.errors.clientes && (
@@ -84,7 +84,7 @@ export function StepIdentificacao() {
 
           {/* Projeto / Endereço */}
           <div>
-            <label className="mb-1.5 block text-sm font-medium text-gray-500">
+            <label className="mb-1.5 block text-sm font-medium text-gray-500 dark:text-gray-400">
               Projeto (endereço)
             </label>
             <input
@@ -94,13 +94,13 @@ export function StepIdentificacao() {
                 dispatch({ type: 'SET_FIELD', field: 'projeto', value: e.target.value })
               }
               placeholder="Rua, número, complemento"
-              className="w-full rounded-lg border border-gray-200 px-3 py-2.5 text-sm text-gray-900 transition-colors placeholder:text-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-200"
+              className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-900 transition-colors placeholder:text-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-200 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:focus:ring-gray-600"
             />
           </div>
 
           {/* Data */}
           <div>
-            <label className="mb-1.5 block text-sm font-medium text-gray-500">
+            <label className="mb-1.5 block text-sm font-medium text-gray-500 dark:text-gray-400">
               Data do documento
             </label>
             <input
@@ -109,7 +109,7 @@ export function StepIdentificacao() {
               onChange={(e) =>
                 dispatch({ type: 'SET_DATA', data: new Date(e.target.value + 'T12:00:00') })
               }
-              className="w-full rounded-lg border border-gray-200 px-3 py-2.5 text-sm text-gray-900 transition-colors focus:outline-none focus:ring-2 focus:ring-gray-200"
+              className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-900 transition-colors focus:outline-none focus:ring-2 focus:ring-gray-200 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:focus:ring-gray-600"
             />
           </div>
         </div>
@@ -119,7 +119,7 @@ export function StepIdentificacao() {
       <div className="flex justify-end">
         <button
           onClick={handleContinuar}
-          className="rounded-lg bg-gray-900 px-6 py-3 text-sm font-medium text-white transition-colors hover:bg-gray-800"
+          className="rounded-lg bg-gray-900 px-6 py-3 text-sm font-medium text-white transition-colors hover:bg-gray-800 dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-white"
         >
           Continuar
         </button>

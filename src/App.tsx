@@ -4,6 +4,7 @@
 
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import { AuthProvider } from './context/AuthContext'
+import { ThemeProvider } from './context/ThemeContext'
 import { AppShell } from './components/layout/AppShell'
 import { HomePage } from './pages/HomePage'
 import { WizardPage } from './pages/WizardPage'
@@ -14,6 +15,7 @@ export function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
+        <ThemeProvider>
         <AppShell>
           <Routes>
             <Route path="/" element={<HomePage />} />
@@ -22,6 +24,7 @@ export function App() {
             <Route path="/acompanhamento" element={<AcompanhamentoPage />} />
           </Routes>
         </AppShell>
+        </ThemeProvider>
       </AuthProvider>
     </BrowserRouter>
   )

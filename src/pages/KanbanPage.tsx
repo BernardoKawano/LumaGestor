@@ -101,18 +101,18 @@ export function KanbanPage() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 text-gray-900 dark:text-gray-100">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-semibold text-gray-900">Status</h1>
-          <p className="mt-1 text-sm text-gray-500">
+          <h1 className="text-xl font-semibold text-gray-900 dark:text-gray-100">Status</h1>
+          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
             Acompanhe suas solicitações de pagamento
           </p>
         </div>
         <button
           onClick={() => navigate('/wizard')}
-          className="rounded-lg bg-gray-900 px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-gray-800"
+          className="rounded-lg bg-gray-900 px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-gray-800 dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-white"
         >
           Nova Solicitação
         </button>
@@ -122,7 +122,7 @@ export function KanbanPage() {
       {loading ? (
         <div className="grid gap-4 sm:grid-cols-3">
           {[1, 2, 3].map((i) => (
-            <div key={i} className="h-64 animate-pulse rounded-2xl bg-gray-100" />
+            <div key={i} className="h-64 animate-pulse rounded-2xl bg-gray-100 dark:bg-gray-800" />
           ))}
         </div>
       ) : (
@@ -133,7 +133,7 @@ export function KanbanPage() {
             return (
               <div
                 key={col.status}
-                className="flex flex-col rounded-2xl border border-gray-100 bg-gray-50/50"
+                className="flex flex-col rounded-2xl border border-gray-100 bg-gray-50/50 dark:border-gray-700 dark:bg-gray-900/50"
               >
                 {/* Column header */}
                 <div className={`flex items-center justify-between rounded-t-2xl px-4 py-3 ${col.color}`}>
@@ -150,7 +150,7 @@ export function KanbanPage() {
                 <div className="flex flex-1 flex-col gap-2 p-3">
                   {colItems.length === 0 ? (
                     <div className="flex flex-1 items-center justify-center py-12">
-                      <p className="text-xs text-gray-300">{col.emptyText}</p>
+                      <p className="text-xs text-gray-300 dark:text-gray-600">{col.emptyText}</p>
                     </div>
                   ) : (
                     colItems.map((item) => {
@@ -219,21 +219,21 @@ function KanbanCard({
   const dataFormatada = new Date(item.data).toLocaleDateString('pt-BR')
 
   return (
-    <div className="rounded-xl border border-gray-100 bg-white p-4 shadow-sm transition-shadow hover:shadow-md">
+    <div className="rounded-xl border border-gray-100 bg-white p-4 shadow-sm transition-shadow hover:shadow-md dark:border-gray-700 dark:bg-gray-800/80">
       {/* Obra + data */}
       <div className="flex items-start justify-between gap-2">
-        <p className="text-sm font-semibold text-gray-900 leading-tight">
+        <p className="text-sm font-semibold leading-tight text-gray-900 dark:text-gray-100">
           {item.obraNome}
         </p>
-        <span className="shrink-0 text-[10px] text-gray-400">{dataFormatada}</span>
+        <span className="shrink-0 text-[10px] text-gray-400 dark:text-gray-500">{dataFormatada}</span>
       </div>
 
       {/* Cliente */}
-      <p className="mt-1 text-xs text-gray-500">{item.clientes}</p>
+      <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{item.clientes}</p>
 
       {/* Valor */}
       <div className="mt-3 flex items-baseline justify-between">
-        <span className="font-mono text-sm font-semibold tabular-nums text-gray-900">
+        <span className="font-mono text-sm font-semibold tabular-nums text-gray-900 dark:text-gray-100">
           {formatCurrency(item.totalGeral)}
         </span>
         {item.totalReembolso > 0 && (
@@ -260,11 +260,11 @@ function KanbanCard({
 
       {/* Ações de mover */}
       {(onMoveNext || onMovePrev) && (
-        <div className="mt-3 flex items-center gap-2 border-t border-gray-50 pt-3">
+        <div className="mt-3 flex items-center gap-2 border-t border-gray-50 pt-3 dark:border-gray-700">
           {onMovePrev && (
             <button
               onClick={onMovePrev}
-              className="rounded-lg border border-gray-100 px-2.5 py-1 text-[11px] font-medium text-gray-400 transition-colors hover:bg-gray-50 hover:text-gray-600"
+              className="rounded-lg border border-gray-100 px-2.5 py-1 text-[11px] font-medium text-gray-400 transition-colors hover:bg-gray-50 hover:text-gray-600 dark:border-gray-600 dark:hover:bg-gray-700 dark:hover:text-gray-200"
             >
               <svg className="inline h-3 w-3 mr-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
@@ -275,7 +275,7 @@ function KanbanCard({
           {onMoveNext && nextLabel && (
             <button
               onClick={onMoveNext}
-              className="ml-auto rounded-lg bg-gray-900 px-3 py-1 text-[11px] font-medium text-white transition-colors hover:bg-gray-800"
+              className="ml-auto rounded-lg bg-gray-900 px-3 py-1 text-[11px] font-medium text-white transition-colors hover:bg-gray-800 dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-white"
             >
               {nextLabel}
               <svg className="inline h-3 w-3 ml-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>

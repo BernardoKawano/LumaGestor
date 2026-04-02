@@ -68,14 +68,14 @@ export function PreviewTable({ solicitacao }: Props) {
   })
 
   return (
-    <div className="overflow-hidden rounded-lg border border-gray-200">
+    <div className="overflow-hidden rounded-lg border border-gray-200 dark:border-gray-600">
       {/* Header */}
-      <div className="grid grid-cols-[3rem_1fr_auto] border-b border-gray-200 bg-gray-50 px-4 py-2.5">
+      <div className="grid grid-cols-[3rem_1fr_auto] border-b border-gray-200 bg-gray-50 px-4 py-2.5 dark:border-gray-600 dark:bg-gray-800/80">
         <span />
-        <span className="text-xs font-semibold uppercase tracking-wider text-gray-500">
+        <span className="text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">
           Empresa / Loja
         </span>
-        <span className="text-right text-xs font-semibold uppercase tracking-wider text-gray-500">
+        <span className="text-right text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">
           Valor
         </span>
       </div>
@@ -86,27 +86,27 @@ export function PreviewTable({ solicitacao }: Props) {
           key={i}
           className={`grid grid-cols-[3rem_1fr_auto] px-4 py-2.5 ${
             item.isTotal
-              ? 'border-t-2 border-gray-900 bg-gray-50'
+              ? 'border-t-2 border-gray-900 bg-gray-50 dark:border-gray-100 dark:bg-gray-800/80'
               : i < items.length - 1
-                ? 'border-b border-gray-100'
+                ? 'border-b border-gray-100 dark:border-gray-700'
                 : ''
           }`}
         >
-          <span className="font-mono text-sm text-gray-400">{item.indice}</span>
+          <span className="font-mono text-sm text-gray-400 dark:text-gray-500">{item.indice}</span>
           <span
             className={`text-sm ${
               item.isTotal
-                ? 'font-bold text-gray-900'
+                ? 'font-bold text-gray-900 dark:text-gray-100'
                 : item.isBold
-                  ? 'font-semibold text-gray-700'
-                  : 'text-gray-700'
+                  ? 'font-semibold text-gray-700 dark:text-gray-200'
+                  : 'text-gray-700 dark:text-gray-200'
             }`}
           >
             {item.descricao}
           </span>
           <span
             className={`text-right font-mono text-sm tabular-nums ${
-              item.isTotal ? 'font-bold text-gray-900' : 'text-gray-700'
+              item.isTotal ? 'font-bold text-gray-900 dark:text-gray-100' : 'text-gray-700 dark:text-gray-200'
             }`}
           >
             {item.valor}

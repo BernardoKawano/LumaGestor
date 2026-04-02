@@ -117,16 +117,16 @@ export function CreateSheetForm({ obra, onCreated }: Props) {
   const percentAlocado = valorTotal > 0 ? Math.min(100, (somaFunc / valorTotal) * 100) : 0
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 text-gray-900 dark:text-gray-100">
       {/* Card principal */}
-      <div className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
-        <h2 className="mb-6 text-lg font-semibold text-gray-900">
+      <div className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm dark:border-gray-700 dark:bg-gray-900">
+        <h2 className="mb-6 text-lg font-semibold text-gray-900 dark:text-gray-100">
           Criar Planilha de Acompanhamento
         </h2>
 
         {/* Valor total da obra */}
         <div className="mb-6">
-          <label className="mb-1.5 block text-sm font-medium text-gray-500">
+          <label className="mb-1.5 block text-sm font-medium text-gray-500 dark:text-gray-400">
             Valor Total da Obra
           </label>
           <CurrencyInput
@@ -136,22 +136,22 @@ export function CreateSheetForm({ obra, onCreated }: Props) {
           />
         </div>
 
-        <div className="border-t border-gray-100" />
+        <div className="border-t border-gray-100 dark:border-gray-700" />
 
         {/* Funcionários */}
         <div className="mt-6">
           <div className="mb-4 flex items-center justify-between">
-            <h3 className="text-sm font-semibold text-gray-900">Funcionários</h3>
+            <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Funcionários</h3>
             <button
               onClick={handleAddFunc}
-              className="rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 transition-colors hover:bg-gray-50"
+              className="rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-800"
             >
               + Funcionário
             </button>
           </div>
 
           {funcionarios.length === 0 ? (
-            <p className="text-sm text-gray-300">
+            <p className="text-sm text-gray-300 dark:text-gray-500">
               Nenhum funcionário adicionado. Clique em "+ Funcionário".
             </p>
           ) : (
@@ -159,14 +159,14 @@ export function CreateSheetForm({ obra, onCreated }: Props) {
               {funcionarios.map((f) => (
                 <div
                   key={f.id}
-                  className="flex items-center gap-3 rounded-lg border border-gray-100 bg-gray-50/50 p-3"
+                  className="flex items-center gap-3 rounded-lg border border-gray-100 bg-gray-50/50 p-3 dark:border-gray-700 dark:bg-gray-800/50"
                 >
                   <input
                     type="text"
                     value={f.nome}
                     onChange={(e) => handleUpdateFunc(f.id, 'nome', e.target.value)}
                     placeholder="Nome do funcionário"
-                    className="min-w-0 flex-1 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm placeholder:text-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-200"
+                    className="min-w-0 flex-1 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm placeholder:text-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-200 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100 dark:focus:ring-gray-600"
                   />
                   <CurrencyInput
                     value={f.valor}
@@ -188,39 +188,41 @@ export function CreateSheetForm({ obra, onCreated }: Props) {
           )}
         </div>
 
-        <div className="mt-6 border-t border-gray-100" />
+        <div className="mt-6 border-t border-gray-100 dark:border-gray-700" />
 
         {/* Marjorie (auto-calculada) */}
         <div className="mt-6">
-          <div className="flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 p-4">
+          <div className="flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 p-4 dark:border-amber-800 dark:bg-amber-950/40">
             <svg className="h-4 w-4 shrink-0 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
             </svg>
             <div className="flex-1">
-              <p className="text-sm font-semibold text-amber-900">Marjorie</p>
-              <p className="text-xs text-amber-600">
+              <p className="text-sm font-semibold text-amber-900 dark:text-amber-100">Marjorie</p>
+              <p className="text-xs text-amber-600 dark:text-amber-400">
                 Valor calculado automaticamente (Total - Funcionários)
               </p>
             </div>
-            <span className="font-mono text-sm font-semibold tabular-nums text-amber-900">
+            <span className="font-mono text-sm font-semibold tabular-nums text-amber-900 dark:text-amber-100">
               {formatCurrency(valorMarjorie)}
             </span>
           </div>
         </div>
 
-        <div className="mt-6 border-t border-gray-100" />
+        <div className="mt-6 border-t border-gray-100 dark:border-gray-700" />
 
         {/* Resumo */}
         <div className="mt-6">
           <div className="flex items-center justify-between text-sm">
-            <span className="text-gray-500">Total alocado</span>
-            <span className={`font-mono tabular-nums ${somaExcede ? 'font-semibold text-red-500' : 'text-gray-700'}`}>
+            <span className="text-gray-500 dark:text-gray-400">Total alocado</span>
+            <span
+              className={`font-mono tabular-nums ${somaExcede ? 'font-semibold text-red-500' : 'text-gray-700 dark:text-gray-200'}`}
+            >
               {formatCurrency(somaFunc + valorMarjorie)} / {formatCurrency(valorTotal)}
             </span>
           </div>
-          <div className="mt-2 h-2 overflow-hidden rounded-full bg-gray-100">
+          <div className="mt-2 h-2 overflow-hidden rounded-full bg-gray-100 dark:bg-gray-800">
             <div
-              className={`h-full rounded-full transition-all ${somaExcede ? 'bg-red-400' : 'bg-gray-900'}`}
+              className={`h-full rounded-full transition-all ${somaExcede ? 'bg-red-400' : 'bg-gray-900 dark:bg-gray-100'}`}
               style={{ width: `${Math.min(100, percentAlocado)}%` }}
             />
           </div>
@@ -239,7 +241,7 @@ export function CreateSheetForm({ obra, onCreated }: Props) {
         <button
           onClick={handleCriar}
           disabled={loading || valorTotal <= 0 || funcionarios.length === 0}
-          className="rounded-lg bg-gray-900 px-6 py-3 text-sm font-medium text-white transition-colors hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
+          className="rounded-lg bg-gray-900 px-6 py-3 text-sm font-medium text-white transition-colors hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-white"
         >
           {loading ? 'Criando planilha...' : 'Criar Planilha'}
         </button>

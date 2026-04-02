@@ -32,6 +32,31 @@ export const processSteps = [
   },
 ] as const
 
+/** Tutorial visual da Nova solicitação (apenas na homepage pública). */
+export const wizardTutorial = {
+  sectionEyebrow: 'Nova solicitação',
+  sectionTitle: 'Assistente em três passos',
+  sectionSubtitle:
+    'Ordem fixa: identificação da obra, valores e PDFs, depois revisão antes de guardar no Drive.',
+  steps: [
+    {
+      id: 'identificacao',
+      label: 'Identificação',
+      hint: 'Escolha a pasta da obra no Drive e confirme clientes e projeto.',
+    },
+    {
+      id: 'itens',
+      label: 'Itens',
+      hint: 'Preencha serviço e adicionais; arraste ou clique para anexar PDFs de reembolso.',
+    },
+    {
+      id: 'revisao',
+      label: 'Revisão',
+      hint: 'Confira totais e gere o PDF — o ficheiro segue para a pasta da obra.',
+    },
+  ],
+} as const
+
 export const productPillars = [
   {
     id: 'drive',

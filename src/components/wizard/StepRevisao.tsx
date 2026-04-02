@@ -86,19 +86,19 @@ export function StepRevisao() {
   return (
     <div className="space-y-6">
       {/* Card de revisão */}
-      <div className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
-        <h2 className="mb-6 text-lg font-semibold text-gray-900">Revisão</h2>
+      <div className="w-full rounded-2xl border border-gray-100 bg-white p-6 shadow-sm dark:border-gray-700 dark:bg-gray-900 sm:p-8">
+        <h2 className="mb-6 text-lg font-semibold text-gray-900 dark:text-gray-100">Revisão</h2>
 
         {/* Cabeçalho do documento */}
         <div className="mb-6 space-y-1.5">
-          <p className="text-center text-xs font-semibold uppercase tracking-wider text-gray-400">
+          <p className="text-center text-xs font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">
             {TEMPLATE.titulo}
           </p>
           <div className="mt-4 space-y-1">
-            <p className="text-sm text-gray-700">
+            <p className="text-sm text-gray-700 dark:text-gray-200">
               <span className="font-semibold">CLIENTES:</span> {s.clientes}
             </p>
-            <p className="text-sm text-gray-700">
+            <p className="text-sm text-gray-700 dark:text-gray-200">
               <span className="font-semibold">PROJETO:</span> {s.projeto}
             </p>
           </div>
@@ -108,11 +108,11 @@ export function StepRevisao() {
         <PreviewTable solicitacao={s} />
 
         {/* Dados bancários */}
-        <div className="mt-6 rounded-lg bg-gray-50 p-4">
-          <p className="mb-2 text-xs font-semibold text-gray-500">
+        <div className="mt-6 rounded-lg bg-gray-50 p-4 dark:bg-gray-800/80">
+          <p className="mb-2 text-xs font-semibold text-gray-500 dark:text-gray-400">
             {TEMPLATE.banco.label}
           </p>
-          <div className="space-y-0.5 text-xs text-gray-500">
+          <div className="space-y-0.5 text-xs text-gray-500 dark:text-gray-400">
             <p>{TEMPLATE.banco.nome}</p>
             <p>{TEMPLATE.banco.razaoSocial}</p>
             <p>CNPJ – {TEMPLATE.banco.cnpj}</p>
@@ -129,7 +129,7 @@ export function StepRevisao() {
           <p className="text-xs text-gray-500">
             {TEMPLATE.assinatura.cidade}, {formatDateExtended(s.data)}.
           </p>
-          <p className="mt-3 text-xs font-medium text-gray-700">
+          <p className="mt-3 text-xs font-medium text-gray-700 dark:text-gray-200">
             {TEMPLATE.assinatura.nome}
           </p>
           <p className="text-xs text-gray-400">
@@ -142,14 +142,14 @@ export function StepRevisao() {
       <div className="flex items-center justify-between">
         <button
           onClick={handleVoltar}
-          className="rounded-lg border border-gray-200 px-5 py-2.5 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-50"
+          className="rounded-lg border border-gray-200 px-5 py-2.5 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-800"
         >
           Voltar
         </button>
         <button
           onClick={handleGerarPdf}
           disabled={state.isGeneratingPdf}
-          className="rounded-lg bg-gray-900 px-6 py-3 text-sm font-medium text-white transition-colors hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
+          className="rounded-lg bg-gray-900 px-6 py-3 text-sm font-medium text-white transition-colors hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-white"
         >
           {state.isGeneratingPdf
             ? state.isUploading

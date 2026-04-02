@@ -3,7 +3,7 @@
    Painel financeiro da obra + cards de funcionários + histórico.
    ──────────────────────────────────────────── */
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { FuncionarioCard } from './FuncionarioCard'
 import { CurrencyInput } from '../shared/CurrencyInput'
 import { formatCurrency } from '../../utils/currency'
@@ -40,6 +40,8 @@ import type { ResumoObraData, RascunhoPagamento } from './ResumoObra'
 import type { RascunhoRecebimentoSheet } from '../../services/google-sheets-obras'
 import { loadRascunhos, saveRascunhos } from '../../utils/rascunhos-store'
 import { getObraMeta, getObraMetaDrive, saveObraMeta } from '../../utils/storage'
+import { errorMessageSuggestsReauth } from '../../utils/apiErrors'
+import { useAuth } from '../../context/AuthContext'
 import type { Obra } from '../../types'
 
 interface Props {
@@ -50,7 +52,12 @@ interface Props {
   onCriarSolicitacao?: (obra: Obra) => void
 }
 
+const RESUMO_WRITE_DEBOUNCE_MS = 1200
+
 export function ManageSheet({ spreadsheetId, obraNome, obra, onSummaryDataChange, onCriarSolicitacao }: Props) {
+  const { signIn } = useAuth()
+  const resumoWriteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [resumoSheetError, setResumoSheetError] = useState<string | null>(null)
   const [config, setConfig] = useState<ObraSheetConfig | null>(null)
   const [summaries, setSummaries] = useState<FuncionarioSummary[]>([])
   const [financial, setFinancial] = useState<ObraFinancialSummary | null>(null)
@@ -82,7 +89,7 @@ export function ManageSheet({ spreadsheetId, obraNome, obra, onSummaryDataChange
   const [addFuncionarioErro, setAddFuncionarioErro] = useState<string | null>(null)
 
   // Tab do painel financeiro (adicionais em primeiro para facilitar acrescentar valor ao total)
-  const [finTab, setFinTab] = useState<'adicionais' | 'recebimentos'>('adicionais')
+  const [finTab, setFinTab] = useState<'adicionais' | 'recebimentos'>('recebimentos')
 
   // Edição inline
   const [editingRecebimento, setEditingRecebimento] = useState<number | null>(null)
@@ -133,18 +140,46 @@ export function ManageSheet({ spreadsheetId, obraNome, obra, onSummaryDataChange
       setRecebimentos(recebData.recebimentos)
       setRascunhos(recebData.rascunhos)
       setPaymentHistoryByFuncionario(allSums.paymentHistoryByFuncionario)
-      if (allSums.summaries.length > 0 && !selectedName) {
-        setSelectedName(allSums.summaries[0].nome)
-      }
+      setSelectedName((prev) => {
+        const names = allSums.summaries.map((x) => x.nome)
+        if (names.length === 0) return null
+        if (prev && names.includes(prev)) return prev
+        return names[0]
+      })
     } catch (err) {
       console.error('Erro ao carregar dados:', err)
     }
-  }, [spreadsheetId, selectedName])
+  }, [spreadsheetId])
 
   useEffect(() => {
     setLoading(true)
     loadAll().finally(() => setLoading(false))
-  }, [spreadsheetId]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [spreadsheetId, loadAll])
+
+  useEffect(() => {
+    setSelectedName(null)
+    setHistory([])
+    setEditingRecebimento(null)
+    setEditingAdicional(null)
+    setEditingPayment(null)
+    setEditForm({})
+    setEditingValorEsperado(false)
+    setEditingRascunhoId(null)
+    setEditRascunhoForm(null)
+    setEditingRascunhoPagId(null)
+    setEditRascunhoPagForm(null)
+    setResumoSheetError(null)
+    if (resumoWriteTimerRef.current) {
+      clearTimeout(resumoWriteTimerRef.current)
+      resumoWriteTimerRef.current = null
+    }
+  }, [spreadsheetId])
+
+  useEffect(() => {
+    return () => {
+      if (resumoWriteTimerRef.current) clearTimeout(resumoWriteTimerRef.current)
+    }
+  }, [])
 
   // Carregar rascunhos de pagamento do localStorage (rascunhos de recebimento vêm da planilha)
   useEffect(() => {
@@ -159,7 +194,7 @@ export function ManageSheet({ spreadsheetId, obraNome, obra, onSummaryDataChange
     saveRascunhos(spreadsheetId, { rascunhosRecebimento: [], rascunhosPagamento })
   }, [spreadsheetId, rascunhosPagamento])
 
-  // Expor dados para exportação de resumo (imagem) + atualizar aba RESUMO na planilha
+  // Expor dados para exportação de resumo (imagem); escrita na aba RESUMO com debounce
   useEffect(() => {
     if (!loading && config) {
       const temRascunhosPag = Object.keys(rascunhosPagamento).some((k) => (rascunhosPagamento[k]?.length ?? 0) > 0)
@@ -175,13 +210,36 @@ export function ManageSheet({ spreadsheetId, obraNome, obra, onSummaryDataChange
       }
       onSummaryDataChange?.(summaryData)
 
-      // Atualiza a aba RESUMO na planilha (sem rascunhos — só dados reais)
       const { rascunhosRecebimento: _, ...dataForSheet } = summaryData
-      writeResumoToSheet(spreadsheetId, dataForSheet).catch((err) => {
-        console.error('Erro ao atualizar aba RESUMO na planilha:', err)
-      })
+      if (resumoWriteTimerRef.current) clearTimeout(resumoWriteTimerRef.current)
+      resumoWriteTimerRef.current = setTimeout(() => {
+        resumoWriteTimerRef.current = null
+        void writeResumoToSheet(spreadsheetId, dataForSheet)
+          .then(() => setResumoSheetError(null))
+          .catch((err: unknown) => {
+            console.error('Erro ao atualizar aba RESUMO na planilha:', err)
+            const msg = err instanceof Error ? err.message : String(err)
+            if (errorMessageSuggestsReauth(msg)) {
+              setResumoSheetError(
+                'Sessão expirou ou falta permissão. Clique em «Entrar com Google» no topo e tente de novo.',
+              )
+            }
+          })
+      }, RESUMO_WRITE_DEBOUNCE_MS)
     }
-  }, [loading, config, obraNome, financial, recebimentos, rascunhos, rascunhosPagamento, summaries, paymentHistoryByFuncionario, onSummaryDataChange, spreadsheetId])
+  }, [
+    loading,
+    config,
+    obraNome,
+    financial,
+    recebimentos,
+    rascunhos,
+    rascunhosPagamento,
+    summaries,
+    paymentHistoryByFuncionario,
+    onSummaryDataChange,
+    spreadsheetId,
+  ])
 
   // Carregar histórico ao selecionar funcionário
   useEffect(() => {
@@ -703,23 +761,38 @@ export function ManageSheet({ spreadsheetId, obraNome, obra, onSummaryDataChange
     return (
       <div className="space-y-4">
         {[1, 2, 3].map((i) => (
-          <div key={i} className="h-24 animate-pulse rounded-xl bg-gray-100" />
+          <div key={i} className="h-24 animate-pulse rounded-xl bg-gray-100 dark:bg-gray-800" />
         ))}
       </div>
     )
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 text-gray-900 dark:text-gray-100">
+      {resumoSheetError && (
+        <div
+          className="flex flex-col gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100 sm:flex-row sm:items-center sm:justify-between"
+          role="alert"
+        >
+          <p className="min-w-0 flex-1">{resumoSheetError}</p>
+          <button
+            type="button"
+            onClick={() => signIn()}
+            className="shrink-0 rounded-lg bg-amber-900 px-4 py-2 text-xs font-medium text-white transition-colors hover:bg-amber-800 dark:bg-amber-600 dark:hover:bg-amber-500"
+          >
+            Entrar com Google
+          </button>
+        </div>
+      )}
       {/* ═══════ Header ═══════ */}
-      <div className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
+      <div className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm dark:border-gray-700 dark:bg-gray-900">
         <div className="flex items-center justify-between">
           <div>
-            <h2 className="text-lg font-semibold text-gray-900">{obraNome}</h2>
-            <div className="mt-0.5 text-sm text-gray-500">
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">{obraNome}</h2>
+            <div className="mt-0.5 text-sm text-gray-500 dark:text-gray-400">
               <span>
                 Valor total da obra:{' '}
-                <strong className="text-gray-900">
+                <strong className="text-gray-900 dark:text-gray-100">
                   {formatCurrency(financial?.totalGeral ?? config?.valorTotalObra ?? 0)}
                 </strong>
               </span>
@@ -742,7 +815,7 @@ export function ManageSheet({ spreadsheetId, obraNome, obra, onSummaryDataChange
                       onChange={handleEmailChange}
                       onBlur={handleBlurEmail}
                       placeholder="cliente@exemplo.com"
-                      className="min-w-0 flex-1 rounded-lg border border-gray-200 px-2.5 py-1.5 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-200"
+                      className="min-w-0 flex-1 rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-200 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:placeholder:text-gray-500 dark:focus:ring-gray-600"
                       spellCheck={false}
                       autoComplete="email"
                     />
@@ -784,14 +857,14 @@ export function ManageSheet({ spreadsheetId, obraNome, obra, onSummaryDataChange
 
       {/* ═══════ Painel Financeiro ═══════ */}
       {financial && (
-        <div className="rounded-2xl border border-gray-100 bg-white shadow-sm">
+        <div className="rounded-2xl border border-gray-100 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-900">
           {/* Métricas */}
           {(() => {
             const totalRascunhos = rascunhos.reduce((a, r) => a + r.valorCentavos, 0)
             const saldoComRascunhos = financial ? financial.totalGeral - financial.totalRecebido - totalRascunhos : 0
             const mostraRascunhos = rascunhos.length > 0
             return (
-              <div className="grid grid-cols-2 gap-px bg-gray-100 sm:grid-cols-4">
+              <div className="grid grid-cols-2 gap-px bg-gray-100 dark:bg-gray-800 sm:grid-cols-4">
                 <MetricCard label="Valor Original" value={financial.valorOriginal} />
                 <MetricCard label="Adicionais" value={financial.totalAdicionais} accent="amber" />
                 <MetricCard label="Total Geral" value={financial.totalGeral} accent="blue" bold />
@@ -806,29 +879,31 @@ export function ManageSheet({ spreadsheetId, obraNome, obra, onSummaryDataChange
           })()}
 
           {/* Tabs: Adicionais | Recebimentos */}
-          <div className="border-t border-gray-100">
-            <div className="flex border-b border-gray-100">
+          <div className="border-t border-gray-100 dark:border-gray-700">
+            <div className="flex border-b border-gray-100 dark:border-gray-700">
               <button
+                type="button"
                 onClick={() => setFinTab('recebimentos')}
                 className={`flex-1 px-4 py-2.5 text-xs font-semibold uppercase tracking-wider transition-colors ${
                   finTab === 'recebimentos'
-                    ? 'border-b-2 border-gray-900 text-gray-900'
-                    : 'text-gray-400 hover:text-gray-600'
+                    ? 'border-b-2 border-gray-900 text-gray-900 dark:border-gray-100 dark:text-gray-100'
+                    : 'text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200'
                 }`}
               >
                 Recebimentos ({recebimentos.length + rascunhos.length})
                 {rascunhos.length > 0 && (
-                  <span className="ml-1 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] text-amber-700">
+                  <span className="ml-1 inline-block rounded border border-amber-300/80 bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-800 dark:border-amber-600/60 dark:bg-amber-950/60 dark:text-amber-200">
                     {rascunhos.length} rascunho{rascunhos.length > 1 ? 's' : ''}
                   </span>
                 )}
               </button>
               <button
+                type="button"
                 onClick={() => setFinTab('adicionais')}
                 className={`flex-1 px-4 py-2.5 text-xs font-semibold uppercase tracking-wider transition-colors ${
                   finTab === 'adicionais'
-                    ? 'border-b-2 border-gray-900 text-gray-900'
-                    : 'text-gray-400 hover:text-gray-600'
+                    ? 'border-b-2 border-gray-900 text-gray-900 dark:border-gray-100 dark:text-gray-100'
+                    : 'text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200'
                 }`}
               >
                 Adicionais ({config?.adicionais.length ?? 0})
@@ -840,25 +915,29 @@ export function ManageSheet({ spreadsheetId, obraNome, obra, onSummaryDataChange
                 /* ── Recebimentos ── */
                 <div className="space-y-4">
                   {/* Form: Adicionar rascunho */}
-                  <div className="rounded-lg border border-dashed border-amber-200 bg-amber-50/30 p-4">
-                    <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-amber-700">
+                  <div className="rounded-lg border border-dashed border-amber-200 bg-amber-50/30 p-4 dark:border-amber-800 dark:bg-amber-950/20">
+                    <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-amber-800 dark:text-amber-300">
                       Adicionar rascunho
                     </p>
-                    <p className="mb-3 text-xs text-amber-800/80">
+                    <p className="mb-3 text-xs text-amber-900/85 dark:text-amber-100/85">
                       Simula um recebimento sem gravar na planilha. Útil para prever saldo ou criar solicitação (ex.: se houver notas de reembolso).
                     </p>
                     <div className="flex flex-wrap items-end gap-3">
                       <div className="w-36">
-                        <label className="mb-1 block text-xs text-amber-800">Data</label>
+                        <label className="mb-1 block text-xs font-medium text-amber-900 dark:text-amber-200">
+                          Data
+                        </label>
                         <input
                           type="date"
                           value={rascunhoForm.data}
                           onChange={(e) => setRascunhoForm((f) => ({ ...f, data: e.target.value }))}
-                          className="w-full rounded border border-amber-200 px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-200"
+                          className="w-full rounded border border-amber-200 bg-white px-2 py-1.5 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-amber-200 dark:border-amber-700 dark:bg-gray-800 dark:text-gray-100 dark:focus:ring-amber-600"
                         />
                       </div>
                       <div className="w-36">
-                        <label className="mb-1 block text-xs text-amber-800">Valor</label>
+                        <label className="mb-1 block text-xs font-medium text-amber-900 dark:text-amber-200">
+                          Valor
+                        </label>
                         <CurrencyInput
                           value={rascunhoForm.valorCentavos}
                           onChange={(v) => setRascunhoForm((f) => ({ ...f, valorCentavos: v }))}
@@ -866,13 +945,15 @@ export function ManageSheet({ spreadsheetId, obraNome, obra, onSummaryDataChange
                         />
                       </div>
                       <div className="min-w-0 flex-1">
-                        <label className="mb-1 block text-xs text-amber-800">Descrição</label>
+                        <label className="mb-1 block text-xs font-medium text-amber-900 dark:text-amber-200">
+                          Descrição
+                        </label>
                         <input
                           type="text"
                           value={rascunhoForm.descricao}
                           onChange={(e) => setRascunhoForm((f) => ({ ...f, descricao: e.target.value }))}
                           placeholder="Ex: Solicitação prevista"
-                          className="w-full rounded border border-amber-200 px-2 py-1.5 text-sm placeholder:text-amber-400/60 focus:outline-none focus:ring-2 focus:ring-amber-200"
+                          className="w-full rounded border border-amber-200 bg-white px-2 py-1.5 text-sm text-gray-900 placeholder:text-amber-500/70 focus:outline-none focus:ring-2 focus:ring-amber-200 dark:border-amber-700 dark:bg-gray-800 dark:text-gray-100 dark:placeholder:text-amber-400/50 dark:focus:ring-amber-600"
                         />
                       </div>
                       <button
@@ -886,23 +967,23 @@ export function ManageSheet({ spreadsheetId, obraNome, obra, onSummaryDataChange
                   </div>
 
                   {recebimentos.length === 0 && rascunhos.length === 0 ? (
-                    <p className="py-6 text-center text-sm text-gray-300">
+                    <p className="py-6 text-center text-sm text-gray-500 dark:text-gray-400">
                       Nenhum recebimento registrado
                     </p>
                   ) : (
-                  <div className="overflow-hidden rounded-lg border border-gray-100">
-                    <div className="grid grid-cols-[90px_1fr_1fr_120px] border-b border-gray-100 bg-gray-50 px-4 py-2">
-                      <span className="text-xs font-semibold text-gray-400">Data</span>
-                      <span className="text-xs font-semibold text-gray-400">Valor</span>
-                      <span className="text-xs font-semibold text-gray-400">Descrição</span>
+                  <div className="overflow-hidden rounded-lg border border-gray-200 dark:border-gray-700">
+                    <div className="grid grid-cols-[90px_1fr_1fr_120px] border-b border-gray-200 bg-gray-100 px-4 py-2.5 dark:border-gray-700 dark:bg-gray-800/90">
+                      <span className="text-xs font-semibold text-gray-600 dark:text-gray-300">Data</span>
+                      <span className="text-xs font-semibold text-gray-600 dark:text-gray-300">Valor</span>
+                      <span className="text-xs font-semibold text-gray-600 dark:text-gray-300">Descrição</span>
                       <span />
                     </div>
                     {recebimentos.map((r, i) => (
                       <div
                         key={r.sheetRow}
-                        className={`grid grid-cols-[90px_1fr_1fr_120px] items-center gap-2 px-4 py-2.5 ${
-                          i < recebimentos.length - 1 ? 'border-b border-gray-50' : ''
-                        } ${editingRecebimento === r.sheetRow ? 'bg-amber-50/50' : ''}`}
+                        className={`grid grid-cols-[90px_1fr_1fr_120px] items-center gap-2 bg-white px-4 py-2.5 dark:bg-gray-900/50 ${
+                          i < recebimentos.length - 1 ? 'border-b border-gray-100 dark:border-gray-800' : ''
+                        } ${editingRecebimento === r.sheetRow ? 'bg-amber-50/50 dark:bg-amber-950/25' : ''}`}
                       >
                         {editingRecebimento === r.sheetRow ? (
                           <>
@@ -910,7 +991,7 @@ export function ManageSheet({ spreadsheetId, obraNome, obra, onSummaryDataChange
                               type="date"
                               value={editForm.data ?? dateBRToISO(r.data)}
                               onChange={(e) => setEditForm((f) => ({ ...f, data: e.target.value }))}
-                              className="rounded border border-gray-200 px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-gray-200"
+                              className="rounded border border-gray-200 bg-white px-2 py-1 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-gray-200 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:focus:ring-gray-600"
                             />
                             <div className="min-w-0">
                               <CurrencyInput
@@ -924,13 +1005,13 @@ export function ManageSheet({ spreadsheetId, obraNome, obra, onSummaryDataChange
                               value={editForm.descricao ?? r.descricao}
                               onChange={(e) => setEditForm((f) => ({ ...f, descricao: e.target.value }))}
                               placeholder="Descrição"
-                              className="min-w-0 rounded border border-gray-200 px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-gray-200"
+                              className="min-w-0 rounded border border-gray-200 bg-white px-2 py-1 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-gray-200 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:focus:ring-gray-600"
                             />
                             <div className="flex items-center gap-1">
                               <button
                                 onClick={handleSaveRecebimento}
                                 disabled={savingEdit}
-                                className="rounded p-1 text-green-600 transition-colors hover:bg-green-50"
+                                className="rounded p-1 text-green-600 transition-colors hover:bg-green-50 dark:hover:bg-green-950/50"
                                 title="Salvar"
                               >
                                 <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -942,7 +1023,7 @@ export function ManageSheet({ spreadsheetId, obraNome, obra, onSummaryDataChange
                                   setEditingRecebimento(null)
                                   setEditForm({})
                                 }}
-                                className="rounded p-1 text-gray-400 transition-colors hover:bg-gray-100"
+                                className="rounded p-1 text-gray-400 transition-colors hover:bg-gray-100 dark:hover:bg-gray-800"
                                 title="Cancelar"
                               >
                                 <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -953,16 +1034,18 @@ export function ManageSheet({ spreadsheetId, obraNome, obra, onSummaryDataChange
                           </>
                         ) : (
                           <>
-                            <span className="text-sm text-gray-600">{r.data}</span>
-                            <span className="font-mono text-sm tabular-nums text-gray-900">{r.valor}</span>
-                            <span className="min-w-0 truncate text-sm text-gray-500">{r.descricao}</span>
+                            <span className="text-sm text-gray-700 dark:text-gray-300">{r.data}</span>
+                            <span className="font-mono text-sm font-medium tabular-nums text-gray-900 dark:text-gray-100">
+                              {r.valor}
+                            </span>
+                            <span className="min-w-0 truncate text-sm text-gray-600 dark:text-gray-400">{r.descricao}</span>
                             <div className="flex items-center gap-1">
                               {r.pdfLink ? (
                                 <a
                                   href={r.pdfLink}
                                   target="_blank"
                                   rel="noopener noreferrer"
-                                  className="text-gray-300 transition-colors hover:text-gray-600"
+                                  className="text-gray-400 transition-colors hover:text-gray-700 dark:text-gray-500 dark:hover:text-gray-300"
                                   title="Ver PDF"
                                 >
                                   <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -975,7 +1058,7 @@ export function ManageSheet({ spreadsheetId, obraNome, obra, onSummaryDataChange
                                   setEditingRecebimento(r.sheetRow)
                                   setEditForm({ data: dateBRToISO(r.data), valor: r.valorCentavos, descricao: r.descricao, pdfLink: r.pdfLink })
                                 }}
-                                className="rounded p-1 text-gray-300 transition-colors hover:bg-gray-100 hover:text-gray-600"
+                                className="rounded p-1 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-700 dark:text-gray-500 dark:hover:bg-gray-800 dark:hover:text-gray-300"
                                 title="Editar"
                               >
                                 <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -985,7 +1068,7 @@ export function ManageSheet({ spreadsheetId, obraNome, obra, onSummaryDataChange
                               <button
                                 onClick={() => handleDeleteRecebimento(r.sheetRow)}
                                 disabled={deletingRecebimentoRow === r.sheetRow}
-                                className="rounded p-1 text-red-400 transition-colors hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-60"
+                                className="rounded p-1 text-red-400 transition-colors hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-60 dark:hover:bg-red-950/40 dark:hover:text-red-400"
                                 title="Excluir recebimento"
                               >
                                 <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -1007,8 +1090,8 @@ export function ManageSheet({ spreadsheetId, obraNome, obra, onSummaryDataChange
                       return (
                         <div
                           key={r.id}
-                          className={`grid grid-cols-[90px_1fr_1fr_120px] items-center gap-2 px-4 py-2.5 border-b border-amber-100 bg-amber-50/50 ${
-                            isEditing ? 'bg-amber-100/50' : ''
+                          className={`grid grid-cols-[90px_1fr_1fr_120px] items-center gap-2 border-b border-amber-100 bg-amber-50/60 px-4 py-2.5 dark:border-gray-700 dark:border-l-2 dark:border-l-amber-500/70 dark:bg-gray-800/50 ${
+                            isEditing ? 'bg-amber-100/70 dark:bg-amber-950/35' : ''
                           }`}
                         >
                           {isEditing && form ? (
@@ -1016,8 +1099,8 @@ export function ManageSheet({ spreadsheetId, obraNome, obra, onSummaryDataChange
                               <input
                                 type="date"
                                 value={form.data}
-                                onChange={(e) => setEditRascunhoForm((f) => f ? { ...f, data: e.target.value } : null)}
-                                className="rounded border border-amber-300 px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-amber-200"
+                                onChange={(e) => setEditRascunhoForm((f) => (f ? { ...f, data: e.target.value } : null))}
+                                className="rounded border border-amber-300 bg-white px-2 py-1 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-amber-200 dark:border-amber-600 dark:bg-gray-950 dark:text-gray-100 dark:focus:ring-amber-600"
                               />
                               <div className="min-w-0">
                                 <CurrencyInput
@@ -1031,13 +1114,13 @@ export function ManageSheet({ spreadsheetId, obraNome, obra, onSummaryDataChange
                                 value={form.descricao}
                                 onChange={(e) => setEditRascunhoForm((f) => f ? { ...f, descricao: e.target.value } : null)}
                                 placeholder="Descrição"
-                                className="min-w-0 rounded border border-amber-300 px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-amber-200"
+                                className="min-w-0 rounded border border-amber-300 bg-white px-2 py-1 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-amber-200 dark:border-amber-600 dark:bg-gray-950 dark:text-gray-100 dark:focus:ring-amber-600"
                               />
                               <div className="flex items-center gap-1">
                                 <button
                                   onClick={() => handleSaveRascunhoEdit(r)}
                                   disabled={!form || form.valorCentavos <= 0}
-                                  className="rounded p-1 text-green-600 transition-colors hover:bg-green-50"
+                                  className="rounded p-1 text-green-500 transition-colors hover:bg-green-950/50 dark:text-green-400"
                                   title="Salvar"
                                 >
                                   <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -1045,8 +1128,11 @@ export function ManageSheet({ spreadsheetId, obraNome, obra, onSummaryDataChange
                                   </svg>
                                 </button>
                                 <button
-                                  onClick={() => { setEditingRascunhoId(null); setEditRascunhoForm(null) }}
-                                  className="rounded p-1 text-gray-400 transition-colors hover:bg-gray-100"
+                                  onClick={() => {
+                                    setEditingRascunhoId(null)
+                                    setEditRascunhoForm(null)
+                                  }}
+                                  className="rounded p-1 text-gray-400 transition-colors hover:bg-gray-700 dark:hover:bg-gray-800"
                                   title="Cancelar"
                                 >
                                   <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -1057,15 +1143,29 @@ export function ManageSheet({ spreadsheetId, obraNome, obra, onSummaryDataChange
                             </>
                           ) : (
                             <>
-                              <span className="text-sm text-amber-800">
-                                {dataBR} <span className="rounded bg-amber-200/60 px-1 py-0.5 text-[10px] font-medium text-amber-800">rascunho</span>
+                              <span className="text-sm text-amber-950 dark:text-gray-200">
+                                <span className="text-amber-900 dark:text-gray-300">{dataBR}</span>{' '}
+                                <span className="rounded border border-amber-400/70 bg-amber-200/80 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-900 dark:border-amber-600/50 dark:bg-amber-950/60 dark:text-amber-200">
+                                  rascunho
+                                </span>
                               </span>
-                              <span className="font-mono text-sm tabular-nums text-gray-900">{formatCurrency(r.valorCentavos)}</span>
-                              <span className="min-w-0 truncate text-sm text-gray-600">{r.descricao}</span>
+                              <span className="font-mono text-sm font-semibold tabular-nums text-gray-900 dark:text-emerald-400">
+                                {formatCurrency(r.valorCentavos)}
+                              </span>
+                              <span className="min-w-0 truncate text-sm text-gray-700 dark:text-gray-400">
+                                {r.descricao}
+                              </span>
                               <div className="flex items-center gap-0.5">
                                 <button
-                                  onClick={() => { setEditingRascunhoId(r.id); setEditRascunhoForm({ data: r.data, valorCentavos: r.valorCentavos, descricao: r.descricao }) }}
-                                  className="rounded p-1 text-amber-600 transition-colors hover:bg-amber-100"
+                                  onClick={() => {
+                                    setEditingRascunhoId(r.id)
+                                    setEditRascunhoForm({
+                                      data: r.data,
+                                      valorCentavos: r.valorCentavos,
+                                      descricao: r.descricao,
+                                    })
+                                  }}
+                                  className="rounded p-1 text-amber-400 transition-colors hover:bg-amber-950/60"
                                   title="Editar"
                                 >
                                   <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -1075,7 +1175,7 @@ export function ManageSheet({ spreadsheetId, obraNome, obra, onSummaryDataChange
                                 <button
                                   onClick={() => handleConfirmarRascunho(r)}
                                   disabled={confirmandoRascunho === r.id}
-                                  className="rounded p-1 text-green-600 transition-colors hover:bg-green-50"
+                                  className="rounded p-1 text-green-500 transition-colors hover:bg-green-950/50 dark:text-green-400"
                                   title="Confirmar e gravar na planilha"
                                 >
                                   {confirmandoRascunho === r.id ? (
@@ -1089,7 +1189,7 @@ export function ManageSheet({ spreadsheetId, obraNome, obra, onSummaryDataChange
                                 {obra && onCriarSolicitacao && (
                                   <button
                                     onClick={() => onCriarSolicitacao(obra)}
-                                    className="rounded p-1 text-blue-600 transition-colors hover:bg-blue-50"
+                                    className="rounded p-1 text-blue-400 transition-colors hover:bg-blue-950/50"
                                     title="Criar solicitação de pagamento (para incluir notas de reembolso)"
                                   >
                                     <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -1099,7 +1199,7 @@ export function ManageSheet({ spreadsheetId, obraNome, obra, onSummaryDataChange
                                 )}
                                 <button
                                   onClick={() => handleRemoveRascunho(r)}
-                                  className="rounded p-1 text-red-400 transition-colors hover:bg-red-50"
+                                  className="rounded p-1 text-red-400 transition-colors hover:bg-red-950/40"
                                   title="Remover rascunho"
                                 >
                                   <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -1112,15 +1212,15 @@ export function ManageSheet({ spreadsheetId, obraNome, obra, onSummaryDataChange
                         </div>
                       )
                     })}
-                    <div className="grid grid-cols-[90px_1fr_1fr_120px] border-t border-gray-200 bg-gray-50 px-4 py-2.5">
-                      <span className="text-xs font-semibold text-gray-500">Total</span>
-                      <span className="font-mono text-sm font-semibold tabular-nums text-gray-900">
+                    <div className="grid grid-cols-[90px_1fr_1fr_120px] border-t border-gray-200 bg-gray-100 px-4 py-2.5 dark:border-gray-700 dark:bg-gray-800/90">
+                      <span className="text-xs font-semibold text-gray-600 dark:text-gray-300">Total</span>
+                      <span className="font-mono text-sm font-semibold tabular-nums text-gray-900 dark:text-gray-100">
                         {formatCurrency(
                           recebimentos.reduce((a, r) => a + r.valorCentavos, 0) +
                           rascunhos.reduce((a, r) => a + r.valorCentavos, 0)
                         )}
                         {rascunhos.length > 0 && (
-                          <span className="ml-1 text-xs font-normal text-amber-700">(incl. rascunhos)</span>
+                          <span className="ml-1 text-xs font-normal text-amber-700 dark:text-amber-400">(incl. rascunhos)</span>
                         )}
                       </span>
                       <span />
@@ -1135,23 +1235,23 @@ export function ManageSheet({ spreadsheetId, obraNome, obra, onSummaryDataChange
                   {/* Form adicionar */}
                   <div className="flex items-end gap-3">
                     <div className="min-w-0 flex-1">
-                      <label className="mb-1 block text-xs text-gray-500">Descrição</label>
+                      <label className="mb-1 block text-xs text-gray-500 dark:text-gray-400">Descrição</label>
                       <input
                         type="text"
                         value={addDesc}
                         onChange={(e) => setAddDesc(e.target.value)}
                         placeholder="Ex: Serralheria, Elétrica extra..."
-                        className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm placeholder:text-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-200"
+                        className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-200 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:placeholder:text-gray-500 dark:focus:ring-gray-600"
                       />
                     </div>
                     <div className="w-40">
-                      <label className="mb-1 block text-xs text-gray-500">Valor</label>
+                      <label className="mb-1 block text-xs text-gray-500 dark:text-gray-400">Valor</label>
                       <CurrencyInput value={addValor} onChange={setAddValor} />
                     </div>
                     <button
                       onClick={handleAddAdicional}
                       disabled={addingAdicional || !addDesc.trim() || addValor <= 0}
-                      className="shrink-0 rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
+                      className="shrink-0 rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-white"
                     >
                       {addingAdicional ? 'Salvando...' : 'Adicionar'}
                     </button>
@@ -1159,15 +1259,15 @@ export function ManageSheet({ spreadsheetId, obraNome, obra, onSummaryDataChange
 
                   {/* Lista */}
                   {(config?.adicionais.length ?? 0) === 0 ? (
-                    <p className="py-6 text-center text-sm text-gray-300">
+                    <p className="py-6 text-center text-sm text-gray-500 dark:text-gray-400">
                       Nenhum adicional registrado
                     </p>
                   ) : (
-                    <div className="overflow-hidden rounded-lg border border-gray-100">
-                      <div className="grid grid-cols-[1fr_120px_90px_80px] border-b border-gray-100 bg-gray-50 px-4 py-2">
-                        <span className="text-xs font-semibold text-gray-400">Descrição</span>
-                        <span className="text-xs font-semibold text-gray-400">Valor</span>
-                        <span className="text-xs font-semibold text-gray-400">Data</span>
+                    <div className="overflow-hidden rounded-lg border border-gray-200 dark:border-gray-700">
+                      <div className="grid grid-cols-[1fr_120px_90px_80px] border-b border-gray-200 bg-gray-100 px-4 py-2.5 dark:border-gray-700 dark:bg-gray-800/90">
+                        <span className="text-xs font-semibold text-gray-600 dark:text-gray-300">Descrição</span>
+                        <span className="text-xs font-semibold text-gray-600 dark:text-gray-300">Valor</span>
+                        <span className="text-xs font-semibold text-gray-600 dark:text-gray-300">Data</span>
                         <span />
                       </div>
                       {config!.adicionais.map((a, i) => {
@@ -1176,9 +1276,9 @@ export function ManageSheet({ spreadsheetId, obraNome, obra, onSummaryDataChange
                         return (
                           <div
                             key={i}
-                            className={`grid grid-cols-[1fr_120px_90px_80px] items-center gap-2 px-4 py-2.5 ${
-                              i < config!.adicionais.length - 1 ? 'border-b border-gray-50' : ''
-                            } ${isEditing ? 'bg-amber-50/50' : ''}`}
+                            className={`grid grid-cols-[1fr_120px_90px_80px] items-center gap-2 bg-white px-4 py-2.5 dark:bg-gray-900/50 ${
+                              i < config!.adicionais.length - 1 ? 'border-b border-gray-100 dark:border-gray-800' : ''
+                            } ${isEditing ? 'bg-amber-50/50 dark:bg-amber-950/25' : ''}`}
                           >
                             {isEditing ? (
                               <>
@@ -1187,7 +1287,7 @@ export function ManageSheet({ spreadsheetId, obraNome, obra, onSummaryDataChange
                                   value={editForm.descricao ?? a.descricao}
                                   onChange={(e) => setEditForm((f) => ({ ...f, descricao: e.target.value }))}
                                   placeholder="Descrição"
-                                  className="min-w-0 rounded border border-gray-200 px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-gray-200"
+                                  className="min-w-0 rounded border border-gray-200 bg-white px-2 py-1 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-gray-200 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:focus:ring-gray-600"
                                 />
                                 <div className="min-w-0">
                                   <CurrencyInput
@@ -1200,7 +1300,7 @@ export function ManageSheet({ spreadsheetId, obraNome, obra, onSummaryDataChange
                                   type="date"
                                   value={editForm.data ?? dateBRToISO(a.data)}
                                   onChange={(e) => setEditForm((f) => ({ ...f, data: e.target.value }))}
-                                  className="rounded border border-gray-200 px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-gray-200"
+                                  className="rounded border border-gray-200 bg-white px-2 py-1 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-gray-200 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:focus:ring-gray-600"
                                 />
                                 <div className="flex items-center gap-1">
                                   <button
@@ -1229,11 +1329,11 @@ export function ManageSheet({ spreadsheetId, obraNome, obra, onSummaryDataChange
                               </>
                             ) : (
                               <>
-                                <span className="text-sm text-gray-900">{a.descricao}</span>
-                                <span className="font-mono text-sm tabular-nums text-amber-700">
+                                <span className="text-sm text-gray-900 dark:text-gray-100">{a.descricao}</span>
+                                <span className="font-mono text-sm font-medium tabular-nums text-amber-700 dark:text-amber-400">
                                   + {formatCurrency(a.valor)}
                                 </span>
-                                <span className="text-xs text-gray-400">{a.data}</span>
+                                <span className="text-xs text-gray-500 dark:text-gray-400">{a.data}</span>
                                 <button
                                   onClick={() => {
                                     setEditingAdicional(sheetRow)
@@ -1243,7 +1343,7 @@ export function ManageSheet({ spreadsheetId, obraNome, obra, onSummaryDataChange
                                       data: dateBRToISO(a.data),
                                     })
                                   }}
-                                  className="rounded p-1 text-gray-300 transition-colors hover:bg-gray-100 hover:text-gray-600"
+                                  className="rounded p-1 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-700 dark:text-gray-500 dark:hover:bg-gray-800 dark:hover:text-gray-300"
                                   title="Editar"
                                 >
                                   <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -1255,9 +1355,9 @@ export function ManageSheet({ spreadsheetId, obraNome, obra, onSummaryDataChange
                           </div>
                         )
                       })}
-                      <div className="grid grid-cols-[1fr_120px_90px_80px] border-t border-gray-200 bg-gray-50 px-4 py-2.5">
-                        <span className="text-xs font-semibold text-gray-500">Total</span>
-                        <span className="font-mono text-sm font-semibold tabular-nums text-amber-700">
+                      <div className="grid grid-cols-[1fr_120px_90px_80px] border-t border-gray-200 bg-gray-100 px-4 py-2.5 dark:border-gray-700 dark:bg-gray-800/90">
+                        <span className="text-xs font-semibold text-gray-600 dark:text-gray-300">Total</span>
+                        <span className="font-mono text-sm font-semibold tabular-nums text-amber-700 dark:text-amber-400">
                           + {formatCurrency(config!.adicionais.reduce((a, x) => a + x.valor, 0))}
                         </span>
                         <span />
@@ -1274,7 +1374,7 @@ export function ManageSheet({ spreadsheetId, obraNome, obra, onSummaryDataChange
       {/* ═══════ Cards de funcionários ═══════ */}
       <div>
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-          <p className="text-xs font-semibold uppercase tracking-wider text-gray-400">
+          <p className="text-xs font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">
             Funcionários
           </p>
           <button
@@ -1283,7 +1383,7 @@ export function ManageSheet({ spreadsheetId, obraNome, obra, onSummaryDataChange
               setShowAddFuncionario((v) => !v)
               setAddFuncionarioErro(null)
             }}
-            className="flex items-center gap-1 rounded-lg border border-dashed border-gray-300 px-2.5 py-1.5 text-xs font-medium text-gray-600 transition-colors hover:border-gray-400 hover:bg-gray-50"
+            className="flex items-center gap-1 rounded-lg border border-dashed border-gray-300 px-2.5 py-1.5 text-xs font-medium text-gray-600 transition-colors hover:border-gray-400 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:border-gray-500 dark:hover:bg-gray-800"
           >
             <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
@@ -1292,23 +1392,23 @@ export function ManageSheet({ spreadsheetId, obraNome, obra, onSummaryDataChange
           </button>
         </div>
         {showAddFuncionario && (
-          <div className="mb-3 rounded-lg border border-dashed border-blue-200 bg-blue-50/30 p-4">
-            <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-blue-700">
+          <div className="mb-3 rounded-lg border border-dashed border-blue-200 bg-blue-50/30 p-4 dark:border-blue-800 dark:bg-blue-950/30">
+            <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-blue-700 dark:text-blue-400">
               Novo funcionário
             </p>
             <div className="flex flex-wrap items-end gap-3">
               <div className="min-w-[140px]">
-                <label className="mb-1 block text-xs text-blue-800">Nome</label>
+                <label className="mb-1 block text-xs text-blue-800 dark:text-blue-300">Nome</label>
                 <input
                   type="text"
                   value={addFuncNome}
                   onChange={(e) => setAddFuncNome(e.target.value)}
                   placeholder="Nome do funcionário"
-                  className="w-full rounded-lg border border-blue-200 px-3 py-2 text-sm placeholder:text-blue-300 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                  className="w-full rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-blue-300 focus:outline-none focus:ring-2 focus:ring-blue-200 dark:border-blue-700 dark:bg-gray-800 dark:text-gray-100 dark:placeholder:text-blue-500/60 dark:focus:ring-blue-700"
                 />
               </div>
               <div className="w-36">
-                <label className="mb-1 block text-xs text-blue-800">Valor esperado</label>
+                <label className="mb-1 block text-xs text-blue-800 dark:text-blue-300">Valor esperado</label>
                 <CurrencyInput value={addFuncValor} onChange={setAddFuncValor} />
               </div>
               <div className="flex items-center gap-2">
@@ -1328,14 +1428,14 @@ export function ManageSheet({ spreadsheetId, obraNome, obra, onSummaryDataChange
                     setAddFuncValor(0)
                     setAddFuncionarioErro(null)
                   }}
-                  className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-50"
+                  className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-800"
                 >
                   Cancelar
                 </button>
               </div>
             </div>
             {addFuncionarioErro && (
-              <p className="mt-2 text-xs text-red-600">{addFuncionarioErro}</p>
+              <p className="mt-2 text-xs text-red-600 dark:text-red-400">{addFuncionarioErro}</p>
             )}
           </div>
         )}
@@ -1368,15 +1468,15 @@ export function ManageSheet({ spreadsheetId, obraNome, obra, onSummaryDataChange
         const totalPagoComRascunhos = selected.totalPago + totalRascunhosPag
         const saldoComRascunhos = selected.valorEsperado - totalPagoComRascunhos
         return (
-        <div className="rounded-2xl border border-gray-100 bg-white shadow-sm">
+        <div className="rounded-2xl border border-gray-100 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-900">
           {/* Header do painel */}
-          <div className="flex items-center justify-between border-b border-gray-100 px-6 py-4">
+          <div className="flex items-center justify-between border-b border-gray-100 px-6 py-4 dark:border-gray-700">
             <div>
-              <h3 className="text-sm font-semibold text-gray-900">{selected.nome}</h3>
+              <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">{selected.nome}</h3>
               <div className="mt-0.5 flex flex-wrap items-center gap-2">
                 {editingValorEsperado ? (
                   <>
-                    <span className="text-xs text-gray-400">
+                    <span className="text-xs text-gray-400 dark:text-gray-500">
                       {formatCurrency(totalPagoComRascunhos)} pago de
                     </span>
                     <div className="flex items-center gap-1">
@@ -1388,7 +1488,7 @@ export function ManageSheet({ spreadsheetId, obraNome, obra, onSummaryDataChange
                       <button
                         onClick={handleSaveValorEsperado}
                         disabled={savingValorEsperado}
-                        className="rounded p-1 text-green-600 transition-colors hover:bg-green-50"
+                        className="rounded p-1 text-green-600 transition-colors hover:bg-green-50 dark:hover:bg-green-950/50"
                         title="Salvar"
                       >
                         <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -1398,7 +1498,7 @@ export function ManageSheet({ spreadsheetId, obraNome, obra, onSummaryDataChange
                       <button
                         onClick={() => setEditingValorEsperado(false)}
                         disabled={savingValorEsperado}
-                        className="rounded p-1 text-gray-400 transition-colors hover:bg-gray-100"
+                        className="rounded p-1 text-gray-400 transition-colors hover:bg-gray-100 dark:hover:bg-gray-800"
                         title="Cancelar"
                       >
                         <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -1409,10 +1509,10 @@ export function ManageSheet({ spreadsheetId, obraNome, obra, onSummaryDataChange
                   </>
                 ) : (
                   <>
-                    <span className="text-xs text-gray-400">
+                    <span className="text-xs text-gray-400 dark:text-gray-500">
                       {formatCurrency(totalPagoComRascunhos)} pago de {formatCurrency(selected.valorEsperado)}
                       {totalRascunhosPag > 0 && (
-                        <span className="ml-1 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] text-amber-700">
+                        <span className="ml-1 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] text-amber-700 dark:bg-amber-900/50 dark:text-amber-300">
                           {rascunhosDoSelected.length} rascunho{rascunhosDoSelected.length > 1 ? 's' : ''}
                         </span>
                       )}
@@ -1420,7 +1520,7 @@ export function ManageSheet({ spreadsheetId, obraNome, obra, onSummaryDataChange
                     {selected.sheetRow != null && (
                       <button
                         onClick={handleStartEditValorEsperado}
-                        className="rounded p-0.5 text-gray-300 transition-colors hover:bg-gray-100 hover:text-gray-600"
+                        className="rounded p-0.5 text-gray-300 transition-colors hover:bg-gray-100 hover:text-gray-600 dark:text-gray-500 dark:hover:bg-gray-800 dark:hover:text-gray-300"
                         title="Editar valor esperado (ex: quando um adicional vai para este funcionário)"
                       >
                         <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -1435,10 +1535,10 @@ export function ManageSheet({ spreadsheetId, obraNome, obra, onSummaryDataChange
             <span
               className={`rounded-full px-3 py-1 text-xs font-semibold ${
                 saldoComRascunhos < 0
-                  ? 'bg-red-50 text-red-600'
+                  ? 'bg-red-50 text-red-600 dark:bg-red-950/50 dark:text-red-400'
                   : saldoComRascunhos === 0
-                    ? 'bg-green-50 text-green-600'
-                    : 'bg-gray-50 text-gray-600'
+                    ? 'bg-green-50 text-green-600 dark:bg-green-950/50 dark:text-green-400'
+                    : 'bg-gray-50 text-gray-600 dark:bg-gray-800 dark:text-gray-300'
               }`}
             >
               {saldoComRascunhos < 0
@@ -1450,25 +1550,25 @@ export function ManageSheet({ spreadsheetId, obraNome, obra, onSummaryDataChange
           </div>
 
           {/* Form: Adicionar rascunho de pagamento */}
-          <div className="border-b border-gray-100 bg-amber-50/30 px-6 py-4">
-            <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-amber-700">
+          <div className="border-b border-gray-100 bg-amber-50/30 px-6 py-4 dark:border-gray-700 dark:bg-amber-950/25">
+            <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-amber-700 dark:text-amber-400">
               Adicionar rascunho
             </p>
-            <p className="mb-3 text-xs text-amber-800/80">
+            <p className="mb-3 text-xs text-amber-800/80 dark:text-amber-200/80">
               Simula um pagamento sem gravar na planilha. Útil para prever o saldo restante antes de efetuar o pagamento.
             </p>
             <div className="flex flex-wrap items-end gap-3">
               <div className="w-36">
-                <label className="mb-1 block text-xs text-amber-800">Data</label>
+                <label className="mb-1 block text-xs text-amber-800 dark:text-amber-300">Data</label>
                 <input
                   type="date"
                   value={rascunhoPagForm.data}
                   onChange={(e) => setRascunhoPagForm((f) => ({ ...f, data: e.target.value }))}
-                  className="w-full rounded border border-amber-200 px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-200"
+                  className="w-full rounded border border-amber-200 bg-white px-2 py-1.5 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-amber-200 dark:border-amber-700 dark:bg-gray-800 dark:text-gray-100 dark:focus:ring-amber-600"
                 />
               </div>
               <div className="w-36">
-                <label className="mb-1 block text-xs text-amber-800">Valor</label>
+                <label className="mb-1 block text-xs text-amber-800 dark:text-amber-300">Valor</label>
                 <CurrencyInput
                   value={rascunhoPagForm.valorCentavos}
                   onChange={(v) => setRascunhoPagForm((f) => ({ ...f, valorCentavos: v }))}
@@ -1476,13 +1576,13 @@ export function ManageSheet({ spreadsheetId, obraNome, obra, onSummaryDataChange
                 />
               </div>
               <div className="min-w-0 flex-1">
-                <label className="mb-1 block text-xs text-amber-800">Descrição</label>
+                <label className="mb-1 block text-xs text-amber-800 dark:text-amber-300">Descrição</label>
                 <input
                   type="text"
                   value={rascunhoPagForm.descricao}
                   onChange={(e) => setRascunhoPagForm((f) => ({ ...f, descricao: e.target.value }))}
                   placeholder="Ex: Pagamento previsto"
-                  className="w-full rounded border border-amber-200 px-2 py-1.5 text-sm placeholder:text-amber-400/60 focus:outline-none focus:ring-2 focus:ring-amber-200"
+                  className="w-full rounded border border-amber-200 bg-white px-2 py-1.5 text-sm text-gray-900 placeholder:text-amber-400/60 focus:outline-none focus:ring-2 focus:ring-amber-200 dark:border-amber-700 dark:bg-gray-800 dark:text-gray-100 dark:placeholder:text-amber-500/50 dark:focus:ring-amber-600"
                 />
               </div>
               <button
@@ -1496,41 +1596,41 @@ export function ManageSheet({ spreadsheetId, obraNome, obra, onSummaryDataChange
           </div>
 
           {/* Form novo pagamento */}
-          <div className="border-b border-gray-100 bg-gray-50/50 px-6 py-4">
-            <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-gray-400">
+          <div className="border-b border-gray-100 bg-gray-50/50 px-6 py-4 dark:border-gray-700 dark:bg-gray-800/40">
+            <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">
               Novo Pagamento
             </p>
             <div className="flex items-end gap-3">
               <div className="w-36">
-                <label className="mb-1 block text-xs text-gray-500">Data</label>
+                <label className="mb-1 block text-xs text-gray-500 dark:text-gray-400">Data</label>
                 <input
                   type="date"
                   value={payDate}
                   onChange={(e) => setPayDate(e.target.value)}
-                  className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gray-200"
+                  className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-gray-200 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:focus:ring-gray-600"
                 />
               </div>
               <div className="w-36">
-                <label className="mb-1 block text-xs text-gray-500">Valor</label>
+                <label className="mb-1 block text-xs text-gray-500 dark:text-gray-400">Valor</label>
                 <CurrencyInput
                   value={payValor}
                   onChange={setPayValor}
                 />
               </div>
               <div className="min-w-0 flex-1">
-                <label className="mb-1 block text-xs text-gray-500">Descrição</label>
+                <label className="mb-1 block text-xs text-gray-500 dark:text-gray-400">Descrição</label>
                 <input
                   type="text"
                   value={payDesc}
                   onChange={(e) => setPayDesc(e.target.value)}
                   placeholder="Ex: Pagamento parcial"
-                  className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm placeholder:text-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-200"
+                  className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-200 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:placeholder:text-gray-500 dark:focus:ring-gray-600"
                 />
               </div>
               <button
                 onClick={handleRegistrar}
                 disabled={submitting || payValor <= 0}
-                className="shrink-0 rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
+                className="shrink-0 rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-white"
               >
                 {submitting ? 'Salvando...' : 'Registrar'}
               </button>
@@ -1539,26 +1639,26 @@ export function ManageSheet({ spreadsheetId, obraNome, obra, onSummaryDataChange
 
           {/* Histórico */}
           <div className="px-6 py-4">
-            <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-gray-400">
+            <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">
               Histórico
             </p>
 
             {loadingHistory ? (
               <div className="space-y-2">
                 {[1, 2].map((i) => (
-                  <div key={i} className="h-10 animate-pulse rounded-lg bg-gray-50" />
+                  <div key={i} className="h-10 animate-pulse rounded-lg bg-gray-50 dark:bg-gray-800" />
                 ))}
               </div>
             ) : history.length === 0 && rascunhosDoSelected.length === 0 ? (
-              <p className="py-8 text-center text-sm text-gray-300">
+              <p className="py-8 text-center text-sm text-gray-500 dark:text-gray-400">
                 Nenhum pagamento registrado
               </p>
             ) : (
-              <div className="overflow-hidden rounded-lg border border-gray-100">
-                <div className="grid grid-cols-[100px_1fr_1fr_120px] border-b border-gray-100 bg-gray-50 px-4 py-2">
-                  <span className="text-xs font-semibold text-gray-400">Data</span>
-                  <span className="text-xs font-semibold text-gray-400">Valor</span>
-                  <span className="text-xs font-semibold text-gray-400">Descrição</span>
+              <div className="overflow-hidden rounded-lg border border-gray-100 dark:border-gray-700">
+                <div className="grid grid-cols-[100px_1fr_1fr_120px] border-b border-gray-100 bg-gray-50 px-4 py-2 dark:border-gray-700 dark:bg-gray-800/80">
+                  <span className="text-xs font-semibold text-gray-400 dark:text-gray-500">Data</span>
+                  <span className="text-xs font-semibold text-gray-400 dark:text-gray-500">Valor</span>
+                  <span className="text-xs font-semibold text-gray-400 dark:text-gray-500">Descrição</span>
                   <span />
                 </div>
 
@@ -1569,8 +1669,8 @@ export function ManageSheet({ spreadsheetId, obraNome, obra, onSummaryDataChange
                     <div
                       key={sheetRow}
                       className={`grid grid-cols-[100px_1fr_1fr_120px] items-center gap-2 px-4 py-2.5 ${
-                        i < history.length - 1 ? 'border-b border-gray-50' : ''
-                      } ${isEditing ? 'bg-amber-50/50' : ''}`}
+                        i < history.length - 1 ? 'border-b border-gray-50 dark:border-gray-800' : ''
+                      } ${isEditing ? 'bg-amber-50/50 dark:bg-amber-950/30' : ''}`}
                     >
                       {isEditing ? (
                         <>
@@ -1578,7 +1678,7 @@ export function ManageSheet({ spreadsheetId, obraNome, obra, onSummaryDataChange
                             type="date"
                             value={editForm.data ?? dateBRToISO(p.data)}
                             onChange={(e) => setEditForm((f) => ({ ...f, data: e.target.value }))}
-                            className="rounded border border-gray-200 px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-gray-200"
+                            className="rounded border border-gray-200 bg-white px-2 py-1 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-gray-200 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:focus:ring-gray-600"
                           />
                           <div className="min-w-0">
                             <CurrencyInput
@@ -1592,13 +1692,13 @@ export function ManageSheet({ spreadsheetId, obraNome, obra, onSummaryDataChange
                             value={editForm.descricao ?? p.descricao}
                             onChange={(e) => setEditForm((f) => ({ ...f, descricao: e.target.value }))}
                             placeholder="Descrição"
-                            className="min-w-0 rounded border border-gray-200 px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-gray-200"
+                            className="min-w-0 rounded border border-gray-200 bg-white px-2 py-1 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-gray-200 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:focus:ring-gray-600"
                           />
                           <div className="flex items-center gap-1">
                             <button
                               onClick={handleSavePayment}
                               disabled={savingEdit}
-                              className="rounded p-1 text-green-600 transition-colors hover:bg-green-50"
+                              className="rounded p-1 text-green-600 transition-colors hover:bg-green-50 dark:hover:bg-green-950/50"
                               title="Salvar"
                             >
                               <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -1610,7 +1710,7 @@ export function ManageSheet({ spreadsheetId, obraNome, obra, onSummaryDataChange
                                 setEditingPayment(null)
                                 setEditForm({})
                               }}
-                              className="rounded p-1 text-gray-400 transition-colors hover:bg-gray-100"
+                              className="rounded p-1 text-gray-400 transition-colors hover:bg-gray-100 dark:hover:bg-gray-800"
                               title="Cancelar"
                             >
                               <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -1621,9 +1721,9 @@ export function ManageSheet({ spreadsheetId, obraNome, obra, onSummaryDataChange
                         </>
                       ) : (
                         <>
-                          <span className="text-sm text-gray-600">{p.data}</span>
-                          <span className="font-mono text-sm tabular-nums text-gray-900">{p.valor}</span>
-                          <span className="text-sm text-gray-500">{p.descricao}</span>
+                          <span className="text-sm text-gray-600 dark:text-gray-400">{p.data}</span>
+                          <span className="font-mono text-sm tabular-nums text-gray-900 dark:text-gray-100">{p.valor}</span>
+                          <span className="text-sm text-gray-500 dark:text-gray-400">{p.descricao}</span>
                           <div className="flex items-center justify-end gap-1">
                             <button
                               onClick={() => {
@@ -1634,7 +1734,7 @@ export function ManageSheet({ spreadsheetId, obraNome, obra, onSummaryDataChange
                                   descricao: p.descricao,
                                 })
                               }}
-                              className="rounded p-1 text-gray-300 transition-colors hover:bg-gray-100 hover:text-gray-600"
+                              className="rounded p-1 text-gray-300 transition-colors hover:bg-gray-100 hover:text-gray-600 dark:text-gray-500 dark:hover:bg-gray-800 dark:hover:text-gray-300"
                               title="Editar"
                             >
                               <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -1644,7 +1744,7 @@ export function ManageSheet({ spreadsheetId, obraNome, obra, onSummaryDataChange
                             <button
                               onClick={() => handleDeletePayment(sheetRow)}
                               disabled={deletingPaymentRow === sheetRow}
-                              className="rounded p-1 text-red-400 transition-colors hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-60"
+                              className="rounded p-1 text-red-400 transition-colors hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-60 dark:hover:bg-red-950/40 dark:hover:text-red-400"
                               title="Excluir"
                             >
                               <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -1667,8 +1767,8 @@ export function ManageSheet({ spreadsheetId, obraNome, obra, onSummaryDataChange
                   return (
                     <div
                       key={r.id}
-                      className={`grid grid-cols-[100px_1fr_1fr_120px] items-center gap-2 px-4 py-2.5 border-b border-amber-100 bg-amber-50/50 ${
-                        isEditing ? 'bg-amber-100/50' : ''
+                      className={`grid grid-cols-[100px_1fr_1fr_120px] items-center gap-2 border-b border-amber-100 bg-amber-50/50 px-4 py-2.5 dark:border-amber-900/50 dark:bg-amber-950/25 ${
+                        isEditing ? 'bg-amber-100/50 dark:bg-amber-950/40' : ''
                       }`}
                     >
                       {isEditing && form ? (
@@ -1677,7 +1777,7 @@ export function ManageSheet({ spreadsheetId, obraNome, obra, onSummaryDataChange
                             type="date"
                             value={form.data}
                             onChange={(e) => setEditRascunhoPagForm((f) => (f ? { ...f, data: e.target.value } : null))}
-                            className="rounded border border-amber-300 px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-amber-200"
+                            className="rounded border border-amber-300 bg-white px-2 py-1 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-amber-200 dark:border-amber-600 dark:bg-gray-800 dark:text-gray-100 dark:focus:ring-amber-700"
                           />
                           <div className="min-w-0">
                             <CurrencyInput
@@ -1691,13 +1791,13 @@ export function ManageSheet({ spreadsheetId, obraNome, obra, onSummaryDataChange
                             value={form.descricao}
                             onChange={(e) => setEditRascunhoPagForm((f) => (f ? { ...f, descricao: e.target.value } : null))}
                             placeholder="Descrição"
-                            className="min-w-0 rounded border border-amber-300 px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-amber-200"
+                            className="min-w-0 rounded border border-amber-300 bg-white px-2 py-1 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-amber-200 dark:border-amber-600 dark:bg-gray-800 dark:text-gray-100 dark:focus:ring-amber-700"
                           />
                           <div className="flex items-center gap-1">
                             <button
                               onClick={() => handleSaveRascunhoPagEdit(r.id)}
                               disabled={!form || form.valorCentavos <= 0}
-                              className="rounded p-1 text-green-600 transition-colors hover:bg-green-50"
+                              className="rounded p-1 text-green-600 transition-colors hover:bg-green-50 dark:hover:bg-green-950/50"
                               title="Salvar"
                             >
                               <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -1706,7 +1806,7 @@ export function ManageSheet({ spreadsheetId, obraNome, obra, onSummaryDataChange
                             </button>
                             <button
                               onClick={() => { setEditingRascunhoPagId(null); setEditRascunhoPagForm(null) }}
-                              className="rounded p-1 text-gray-400 transition-colors hover:bg-gray-100"
+                              className="rounded p-1 text-gray-400 transition-colors hover:bg-gray-100 dark:hover:bg-gray-800"
                               title="Cancelar"
                             >
                               <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -1717,15 +1817,27 @@ export function ManageSheet({ spreadsheetId, obraNome, obra, onSummaryDataChange
                         </>
                       ) : (
                         <>
-                          <span className="text-sm text-amber-800">
-                            {dataBR} <span className="rounded bg-amber-200/60 px-1 py-0.5 text-[10px] font-medium text-amber-800">rascunho</span>
+                          <span className="text-sm text-amber-800 dark:text-amber-200">
+                            {dataBR}{' '}
+                            <span className="rounded bg-amber-200/60 px-1 py-0.5 text-[10px] font-medium text-amber-800 dark:bg-amber-800/60 dark:text-amber-100">
+                              rascunho
+                            </span>
                           </span>
-                          <span className="font-mono text-sm tabular-nums text-gray-900">{formatCurrency(r.valorCentavos)}</span>
-                          <span className="min-w-0 truncate text-sm text-gray-600">{r.descricao}</span>
+                          <span className="font-mono text-sm tabular-nums text-gray-900 dark:text-gray-100">
+                            {formatCurrency(r.valorCentavos)}
+                          </span>
+                          <span className="min-w-0 truncate text-sm text-gray-600 dark:text-gray-400">{r.descricao}</span>
                           <div className="flex items-center gap-0.5">
                             <button
-                              onClick={() => { setEditingRascunhoPagId(r.id); setEditRascunhoPagForm({ data: r.data, valorCentavos: r.valorCentavos, descricao: r.descricao }) }}
-                              className="rounded p-1 text-amber-600 transition-colors hover:bg-amber-100"
+                              onClick={() => {
+                                setEditingRascunhoPagId(r.id)
+                                setEditRascunhoPagForm({
+                                  data: r.data,
+                                  valorCentavos: r.valorCentavos,
+                                  descricao: r.descricao,
+                                })
+                              }}
+                              className="rounded p-1 text-amber-600 transition-colors hover:bg-amber-100 dark:hover:bg-amber-950/60"
                               title="Editar"
                             >
                               <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -1735,7 +1847,7 @@ export function ManageSheet({ spreadsheetId, obraNome, obra, onSummaryDataChange
                             <button
                               onClick={() => handleConfirmarRascunhoPag(r)}
                               disabled={confirmandoRascunhoPag === r.id}
-                              className="rounded p-1 text-green-600 transition-colors hover:bg-green-50"
+                              className="rounded p-1 text-green-600 transition-colors hover:bg-green-50 dark:hover:bg-green-950/50"
                               title="Confirmar e gravar na planilha"
                             >
                               {confirmandoRascunhoPag === r.id ? (
@@ -1748,7 +1860,7 @@ export function ManageSheet({ spreadsheetId, obraNome, obra, onSummaryDataChange
                             </button>
                             <button
                               onClick={() => handleRemoveRascunhoPag(selectedName!, r.id)}
-                              className="rounded p-1 text-red-400 transition-colors hover:bg-red-50"
+                              className="rounded p-1 text-red-400 transition-colors hover:bg-red-50 dark:hover:bg-red-950/40"
                               title="Remover rascunho"
                             >
                               <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -1762,15 +1874,15 @@ export function ManageSheet({ spreadsheetId, obraNome, obra, onSummaryDataChange
                   )
                 })}
 
-                <div className="grid grid-cols-[100px_1fr_1fr_120px] border-t border-gray-200 bg-gray-50 px-4 py-2.5">
-                  <span className="text-xs font-semibold text-gray-500">Total</span>
-                  <span className="font-mono text-sm font-semibold tabular-nums text-gray-900">
+                <div className="grid grid-cols-[100px_1fr_1fr_120px] border-t border-gray-200 bg-gray-50 px-4 py-2.5 dark:border-gray-700 dark:bg-gray-800/80">
+                  <span className="text-xs font-semibold text-gray-500 dark:text-gray-400">Total</span>
+                  <span className="font-mono text-sm font-semibold tabular-nums text-gray-900 dark:text-gray-100">
                     {formatCurrency(
                       history.reduce((a, p) => a + p.valorCentavos, 0) +
                       rascunhosDoSelected.reduce((a, r) => a + r.valorCentavos, 0)
                     )}
                     {rascunhosDoSelected.length > 0 && (
-                      <span className="ml-1 text-xs font-normal text-amber-700">(incl. rascunhos)</span>
+                      <span className="ml-1 text-xs font-normal text-amber-700 dark:text-amber-400">(incl. rascunhos)</span>
                     )}
                   </span>
                   <span />
@@ -1799,20 +1911,20 @@ function MetricCard({
   bold?: boolean
 }) {
   const colorMap = {
-    amber: 'text-amber-700',
-    blue: 'text-blue-700',
-    green: 'text-green-600',
-    red: 'text-red-600',
+    amber: 'text-amber-700 dark:text-amber-400',
+    blue: 'text-blue-700 dark:text-blue-400',
+    green: 'text-green-600 dark:text-green-400',
+    red: 'text-red-600 dark:text-red-400',
   }
 
   return (
-    <div className="bg-white px-5 py-4">
-      <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-400">
+    <div className="bg-white px-5 py-4 dark:bg-gray-900">
+      <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">
         {label}
       </p>
       <p
         className={`mt-1 font-mono tabular-nums ${bold ? 'text-lg font-bold' : 'text-sm font-semibold'} ${
-          accent ? colorMap[accent] : 'text-gray-900'
+          accent ? colorMap[accent] : 'text-gray-900 dark:text-gray-100'
         }`}
       >
         {formatCurrency(value)}

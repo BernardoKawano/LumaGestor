@@ -5,6 +5,7 @@
 
 import { useLocation } from 'react-router-dom'
 import { WizardProvider, useWizardContext } from '../hooks/useWizard'
+import { WizardInAppTutorial } from '../components/wizard/WizardInAppTutorial'
 import { WizardStepper } from '../components/wizard/WizardStepper'
 import { StepIdentificacao } from '../components/wizard/StepIdentificacao'
 import { StepItens } from '../components/wizard/StepItens'
@@ -17,6 +18,7 @@ function WizardContent() {
 
   return (
     <div className="space-y-8">
+      {state.currentStep === 1 && <WizardInAppTutorial />}
       {state.currentStep !== 'pronto' && (
         <WizardStepper currentStep={state.currentStep as 1 | 2 | 3} />
       )}

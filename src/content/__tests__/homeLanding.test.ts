@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { homeHero, processSteps, productPillars } from '../homeLanding'
+import { homeHero, processSteps, productPillars, wizardTutorial } from '../homeLanding'
 
 describe('homeLanding', () => {
   it('define hero com título e subtítulo não vazios', () => {
@@ -24,6 +24,18 @@ describe('homeLanding', () => {
       expect(p.id).toBeTruthy()
       expect(p.title.length).toBeGreaterThan(0)
       expect(p.text.length).toBeGreaterThan(10)
+    })
+  })
+
+  it('define tutorial da Nova solicitação com três passos e ids únicos', () => {
+    expect(wizardTutorial.sectionTitle.length).toBeGreaterThan(5)
+    expect(wizardTutorial.sectionSubtitle.length).toBeGreaterThan(30)
+    expect(wizardTutorial.steps).toHaveLength(3)
+    const ids = wizardTutorial.steps.map((s) => s.id)
+    expect(new Set(ids).size).toBe(3)
+    wizardTutorial.steps.forEach((s) => {
+      expect(s.label.length).toBeGreaterThan(0)
+      expect(s.hint.length).toBeGreaterThan(20)
     })
   })
 })
