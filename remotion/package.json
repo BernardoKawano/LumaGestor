@@ -1,0 +1,32 @@
+{
+  "name": "luma-gestor-remotion",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "remotion studio",
+    "build": "remotion bundle",
+    "render": "remotion render src/index.ts SaasShowcase out/saas-capture.mp4",
+    "render:flat": "remotion render src/index.ts SaasCapture out/saas-capture-flat.mp4",
+    "capture": "tsx scripts/capture.ts",
+    "capture:auth": "cross-env CAPTURE_URL=http://localhost:5173 tsx scripts/save-playwright-auth.ts",
+    "capture:app": "cross-env CAPTURE_URL=http://localhost:5173 CAPTURE_JOURNEY=1 tsx scripts/capture.ts",
+    "capture:demo": "cross-env CAPTURE_URL=http://localhost:5173 CAPTURE_JOURNEY=1 CAPTURE_DEMO=1 tsx scripts/capture.ts",
+    "capture:placeholder": "cross-env CAPTURE_PLACEHOLDER=1 tsx scripts/capture.ts",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "remotion": "4.0.372"
+  },
+  "devDependencies": {
+    "@remotion/cli": "4.0.372",
+    "@types/node": "^22.10.0",
+    "@types/react": "^19.0.0",
+    "cross-env": "^7.0.3",
+    "playwright": "^1.49.1",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^3.0.5"
+  }
+}

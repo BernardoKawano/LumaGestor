@@ -1,0 +1,1 @@
+Substitua logo.png pelo PNG oficial da Luma Gestor (ex.: copiar de images/Logo Luma Gestor.png ou public/images/logo-luma-gestor.png na raiz do projeto principal). O ficheiro actual é um placeholder mínimo para o intro do Remotion funcionar sem assets externos.

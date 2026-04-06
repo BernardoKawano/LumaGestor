@@ -1,0 +1,6 @@
+node_modules/
+out/
+.remotion/
+playwright-auth.json
+build/
+public/captures/

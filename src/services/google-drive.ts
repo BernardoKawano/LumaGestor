@@ -4,6 +4,7 @@
    ──────────────────────────────────────────── */
 
 import type { Obra } from '../types'
+import { isDemoCaptureEnabled } from '../demo/demoCapture'
 
 /* ---------- helpers ---------- */
 
@@ -32,6 +33,19 @@ export interface DriveFolder {
  * Se parentId = 'root', lista pastas da raiz do Drive.
  */
 export async function listSubfolders(parentId = 'root'): Promise<DriveFolder[]> {
+  /* DEMO remotion — remover com src/demo/ */
+  if (isDemoCaptureEnabled()) {
+    if (parentId === 'root') {
+      return [{ id: 'demo-CLIENTES-2026', name: 'CLIENTES 2026' }]
+    }
+    if (parentId === 'demo-CLIENTES-2026') {
+      return [
+        { id: 'demo-obra-1', name: 'Obra demo — Residencial Aurora' },
+        { id: 'demo-obra-2', name: 'Obra demo — Ed. Horizonte' },
+      ]
+    }
+    return []
+  }
   const response = await execute<Record<string, unknown>>(
     driveFiles().list({
       q: `'${parentId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`,
@@ -66,6 +80,10 @@ export async function getOrCreateFolder(
   parentId: string,
   folderName: string,
 ): Promise<string> {
+  if (isDemoCaptureEnabled()) {
+    const slug = `${parentId}__${folderName}`.replace(/\s+/g, '-')
+    return `demo-folder-${slug.slice(0, 80)}`
+  }
   // Buscar existente
   const search = await execute<Record<string, unknown>>(
     driveFiles().list({
@@ -108,6 +126,16 @@ export async function uploadFile(
   blob: Blob,
   mimeType = 'application/pdf',
 ): Promise<{ id: string; webViewLink: string }> {
+  if (isDemoCaptureEnabled()) {
+    void parentId
+    void fileName
+    void blob
+    void mimeType
+    return {
+      id: 'demo-file-id',
+      webViewLink: 'https://drive.google.com/file/d/demo-file-id/view',
+    }
+  }
   const token = gapi().getToken()
   if (!token) throw new Error('Sem token de autenticação')
 
@@ -149,6 +177,9 @@ export async function uploadFile(
  * Retorna o ID ou null.
  */
 export async function findSheetInFolder(folderId: string): Promise<string | null> {
+  if (isDemoCaptureEnabled()) {
+    return null
+  }
   const response = await execute<Record<string, unknown>>(
     driveFiles().list({
       q: `'${folderId}' in parents and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false`,

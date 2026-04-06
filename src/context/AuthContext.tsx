@@ -17,6 +17,7 @@ import {
   requestAccessToken,
   revokeToken,
 } from '../services/google-auth'
+import { isDemoCaptureEnabled } from '../demo/demoCapture'
 
 interface AuthState {
   isReady: boolean       // GAPI + GSI carregados
@@ -37,6 +38,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isSignedIn, setIsSignedIn] = useState(false)
 
   useEffect(() => {
+    /* DEMO remotion — remover com src/demo/demoCapture.ts */
+    if (isDemoCaptureEnabled()) {
+      setIsSignedIn(true)
+      setIsReady(true)
+      return
+    }
     async function init() {
       try {
         await initGapiClient()
