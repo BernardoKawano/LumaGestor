@@ -20,7 +20,7 @@ const STEPS = [
   },
   {
     title: 'Colaboradores e valores',
-    text: 'Selecione o funcionário à esquerda para ver histórico e registar pagamentos. No painel financeiro trate adicionais e recebimentos do cliente.',
+    text: 'Selecione o funcionário à esquerda para ver histórico e registar pagamentos. Em Recebimentos registe o que o cliente pagou. Em Adicionais obra grave serviços extras que entram no total com o cliente; em Acréscimos colaborador ajuste só o combinado com um colaborador, sem alterar esse total.',
   },
   {
     title: 'Resumo em imagem',

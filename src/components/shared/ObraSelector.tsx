@@ -91,14 +91,14 @@ export function ObraSelector({ value, onChange, error }: Props) {
   const parentIsClientesYear = isClientesYearFolderName(currentFolderName)
 
   return (
-    <div className="relative">
+    <div className="relative w-full min-w-0">
       <label className="mb-1.5 block text-sm font-medium text-gray-500 dark:text-gray-400">
         Obra
       </label>
 
       {/* Campo de display / trigger */}
       <div
-        className={`flex cursor-pointer items-center rounded-lg border bg-white px-3 py-2.5 transition-colors dark:border-gray-600 dark:bg-gray-900 ${
+        className={`flex w-full min-w-0 cursor-pointer items-center rounded-lg border bg-white px-3 py-2.5 transition-colors dark:border-gray-600 dark:bg-gray-900 ${
           error ? 'border-red-300' : 'border-gray-200'
         }`}
         onClick={() => setIsOpen(!isOpen)}

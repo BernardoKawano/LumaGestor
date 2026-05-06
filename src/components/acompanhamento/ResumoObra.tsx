@@ -1,6 +1,6 @@
 /* ────────────────────────────────────────────
    ResumoObra — Visualização somente leitura para exportar como imagem.
-   Resumo compacto: obra, métricas, recebimentos, adicionais, funcionários.
+   Resumo compacto: obra, métricas, recebimentos, adicionais da obra (ADICIONAL), funcionários.
    ──────────────────────────────────────────── */
 
 import { format } from 'date-fns'
@@ -77,20 +77,19 @@ export function ResumoObra({ data }: Props) {
         <div
           style={{
             display: 'grid',
-            gridTemplateColumns: 'repeat(4, 1fr)',
+            gridTemplateColumns: 'repeat(2, 1fr)',
             gap: 1,
             marginBottom: 20,
             backgroundColor: '#f3f4f6',
           }}
         >
-          <MetricBox label="Valor Original" value={financial.valorOriginal} />
-          <MetricBox label="Adicionais" value={financial.totalAdicionais} accent="#b45309" />
-          <MetricBox label="Total Geral" value={financial.totalGeral} accent="#1d4ed8" bold />
+          <MetricBox label="Valor original" value={financial.valorOriginal} />
+          <MetricBox label="Adicionais obra" value={financial.totalAdicionais} accent="#b45309" />
+          <MetricBox label="Total geral" value={financial.totalGeral} bold />
           <MetricBox
-            label={totalRascunhos > 0 ? 'Saldo (c/ rascunhos)' : 'Saldo Devedor'}
+            label={totalRascunhos > 0 ? 'Saldo (c/ rascunhos)' : 'Saldo devedor'}
             value={financial.totalGeral - totalRecebimentosComRascunhos}
             accent={(financial.totalGeral - totalRecebimentosComRascunhos) <= 0 ? '#15803d' : '#dc2626'}
-            bold
           />
         </div>
       )}
@@ -147,10 +146,10 @@ export function ResumoObra({ data }: Props) {
         )}
       </Section>
 
-      {/* Adicionais */}
-      <Section title="Adicionais">
+      {/* Linhas ADICIONAL em _CONFIG — somam no total geral com o cliente */}
+      <Section title="Adicionais da obra">
         {adicionais.length === 0 ? (
-          <p style={{ margin: 0, color: '#9ca3af', fontSize: 12 }}>Nenhum adicional</p>
+          <p style={{ margin: 0, color: '#9ca3af', fontSize: 12 }}>Nenhum adicional registado</p>
         ) : (
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
             <thead>

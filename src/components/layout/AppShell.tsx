@@ -4,26 +4,28 @@
    ──────────────────────────────────────────── */
 
 import type { ReactNode } from 'react'
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
+import { SetShellContentWidthOverrideContext } from '../../context/ShellContentWidthOverrideContext'
 import { useTheme } from '../../context/ThemeContext'
 import { AppLogo } from '../shared/AppLogo'
 import { applyDocumentTitle } from '../../utils/routeTitle'
+import { resolveShellContentWidthClass, type ShellContentWidthOverride } from '../../utils/shellContentWidth'
 
 export function AppShell({ children }: { children: ReactNode }) {
   const { isSignedIn, signIn, signOut } = useAuth()
   const { pathname } = useLocation()
   const { mode, toggle } = useTheme()
-  /* Home: 5xl; Nova solicitação: mais larga para o formulário; restantes: 3xl */
-  const contentWidth =
-    pathname === '/wizard' ? 'max-w-7xl' : pathname === '/' ? 'max-w-5xl' : 'max-w-3xl'
+  const [contentWidthOverride, setContentWidthOverride] = useState<ShellContentWidthOverride>(null)
+  const contentWidth = resolveShellContentWidthClass(pathname, contentWidthOverride)
 
   useEffect(() => {
     applyDocumentTitle(pathname)
   }, [pathname])
 
   return (
+    <SetShellContentWidthOverrideContext.Provider value={setContentWidthOverride}>
     <div className="flex min-h-screen flex-col bg-primary-50 text-primary-950 transition-colors dark:bg-primary-950 dark:text-primary-100">
       {/* Header */}
       <header className="sticky top-0 z-30 border-b border-primary-200/80 bg-white/85 backdrop-blur-md transition-colors dark:border-primary-800 dark:bg-primary-900/90">
@@ -68,10 +70,11 @@ export function AppShell({ children }: { children: ReactNode }) {
       <main className={`mx-auto flex-1 ${contentWidth} px-6 py-10 sm:py-12`}>{children}</main>
 
       <footer
-        className={`mx-auto w-full ${contentWidth} border-t border-primary-200/80 px-6 py-8 text-center dark:border-primary-800`}
+        className={`mx-auto ${contentWidth} border-t border-primary-200/80 px-6 py-8 text-center dark:border-primary-800`}
       >
         <p className="text-xs text-primary-500 dark:text-primary-400">Bernardo Dias Machado Kawano</p>
       </footer>
     </div>
+    </SetShellContentWidthOverrideContext.Provider>
   )
 }

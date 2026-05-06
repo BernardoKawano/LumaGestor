@@ -3,7 +3,7 @@
    Cria e gerencia planilha de obra com abas por funcionário.
 
    Estrutura da planilha:
-   - Aba "_CONFIG": metadados (valor total, funcionários, adicionais)
+   - Aba "_CONFIG": metadados (valor total, funcionários, ADICIONAL = extras que somam no total da obra)
    - Aba "RECEBIMENTOS": pagamentos recebidos do cliente
    - Aba por funcionário: Data | Valor Pago | Descrição
    ──────────────────────────────────────────── */
@@ -11,6 +11,12 @@
 import { format } from 'date-fns'
 import { formatDateBR } from '../utils/date'
 import { formatCurrency } from '../utils/currency'
+import {
+  buildAcrescimoHistoricoDescricao,
+  novoValorEsperadoComAcrescimo,
+  parseIncrementoCentavosAcrescimoHistorico,
+} from '../utils/funcionarioAcrescimo'
+import { totaisResumoObraCliente } from '../utils/obraFinancialTotals'
 
 /* ────────── Tipos ────────── */
 
@@ -62,9 +68,9 @@ export interface FuncionarioSummary {
 }
 
 export interface ObraFinancialSummary {
-  valorOriginal: number     // centavos — valor total original da obra
-  totalAdicionais: number   // centavos — soma dos adicionais
-  totalGeral: number        // centavos — original + adicionais
+  valorOriginal: number     // centavos — VALOR_TOTAL_OBRA (_CONFIG)
+  totalAdicionais: number   // centavos — soma das linhas ADICIONAL (extras da obra)
+  totalGeral: number        // centavos — valorOriginal + totalAdicionais (total a receber do cliente)
   totalRecebido: number     // centavos — soma dos recebimentos do cliente
   saldoDevedor: number      // centavos — totalGeral - totalRecebido
 }
@@ -872,7 +878,7 @@ export async function writeResumoToSheet(
   let metricsDataRow = -1
   if (data.financial) {
     const f = data.financial
-    rows.push(['Valor Original', 'Adicionais', 'Total Geral', 'Saldo Devedor'])
+    rows.push(['Valor original', 'Adicionais obra', 'Total geral', 'Saldo devedor'])
     metricsHeaderRow = row++
     rows.push([
       formatCurrency(f.valorOriginal),
@@ -906,8 +912,8 @@ export async function writeResumoToSheet(
   rows.push([])
   row++
 
-  // Adicionais
-  rows.push(['ADICIONAIS'])
+  // Adicionais da obra (_CONFIG, tipo ADICIONAL)
+  rows.push(['ADICIONAIS DA OBRA'])
   const adicionaisSectionRow = row++
   rows.push(['Descrição', 'Valor', 'Data'])
   const adicionaisHeaderRow = row++
@@ -1192,6 +1198,70 @@ export async function updateFuncionarioValorEsperado(
   if (!response.ok) {
     throw new Error(`Erro ao atualizar valor esperado: ${response.status}`)
   }
+}
+
+/**
+ * Aumenta o total a receber do colaborador (ex.: serviço extra acordado com o proprietário)
+ * e grava uma linha de histórico na aba do funcionário com valor R$ 0 (apenas registro).
+ */
+export async function registrarAcrescimoValorEsperadoFuncionario(
+  spreadsheetId: string,
+  tabNameFuncionario: string,
+  configSheetRow: number,
+  valorEsperadoAtualCentavos: number,
+  incrementoCentavos: number,
+  motivo: string,
+): Promise<void> {
+  const novo = novoValorEsperadoComAcrescimo(valorEsperadoAtualCentavos, incrementoCentavos)
+  await updateFuncionarioValorEsperado(spreadsheetId, configSheetRow, novo)
+  const descricao = buildAcrescimoHistoricoDescricao(incrementoCentavos, motivo)
+  await appendPayment(spreadsheetId, tabNameFuncionario, new Date(), 0, descricao)
+}
+
+/**
+ * Remove a linha de histórico de acréscimo e reduz o valor esperado do colaborador.
+ */
+export async function deleteAcrescimoHistoricoFuncionario(
+  spreadsheetId: string,
+  tabNameFuncionario: string,
+  paymentSheetRow: number,
+  configSheetRow: number,
+  valorEsperadoAtualCentavos: number,
+  descricaoLinha: string,
+): Promise<void> {
+  const inc = parseIncrementoCentavosAcrescimoHistorico(descricaoLinha)
+  if (inc == null || inc <= 0) {
+    throw new Error('Não foi possível interpretar o acréscimo desta linha')
+  }
+  const novoEsperado = Math.max(0, valorEsperadoAtualCentavos - inc)
+  await updateFuncionarioValorEsperado(spreadsheetId, configSheetRow, novoEsperado)
+  await deletePayment(spreadsheetId, tabNameFuncionario, paymentSheetRow)
+}
+
+/**
+ * Atualiza data / valor (incremento) / motivo de uma linha de acréscimo e ajusta o valor esperado.
+ */
+export async function updateAcrescimoHistoricoFuncionario(
+  spreadsheetId: string,
+  tabNameFuncionario: string,
+  paymentSheetRow: number,
+  configSheetRow: number,
+  valorEsperadoAtualCentavos: number,
+  descricaoAnterior: string,
+  data: Date,
+  novoIncrementoCentavos: number,
+  novoMotivo: string,
+): Promise<void> {
+  if (novoIncrementoCentavos <= 0) throw new Error('O acréscimo deve ser maior que zero')
+  const velho = parseIncrementoCentavosAcrescimoHistorico(descricaoAnterior)
+  if (velho == null || velho <= 0) {
+    throw new Error('Não foi possível interpretar o acréscimo anterior desta linha')
+  }
+  const novoEsperado = valorEsperadoAtualCentavos - velho + novoIncrementoCentavos
+  if (novoEsperado < 0) throw new Error('Valor esperado ficaria negativo; ajuste o valor do acréscimo')
+  await updateFuncionarioValorEsperado(spreadsheetId, configSheetRow, novoEsperado)
+  const descricao = buildAcrescimoHistoricoDescricao(novoIncrementoCentavos, novoMotivo)
+  await updatePayment(spreadsheetId, tabNameFuncionario, paymentSheetRow, data, 0, descricao)
 }
 
 /**
@@ -1618,8 +1688,8 @@ export async function deleteRecebimento(
 /* ────────── Resumo Financeiro da Obra ────────── */
 
 /**
- * Calcula o resumo financeiro completo da obra:
- * Valor original + adicionais = total geral - recebimentos = saldo devedor
+ * Resumo financeiro «obra vs cliente»: total geral = VALOR_TOTAL_OBRA + soma dos ADICIONAL em _CONFIG.
+ * (Acréscimos só do colaborador não usam linhas ADICIONAL — ficam na aba do funcionário.)
  */
 export async function readObraFinancialSummary(
   spreadsheetId: string,
@@ -1628,12 +1698,10 @@ export async function readObraFinancialSummary(
   const recebimentos = await readRecebimentos(spreadsheetId)
 
   const valorOriginal = config.valorTotalObra
-  const totalAdicionais = config.adicionais.reduce((acc, a) => acc + a.valor, 0)
-  const totalGeral = valorOriginal + totalAdicionais
+  const somaAdicionaisObra = config.adicionais.reduce((acc, a) => acc + a.valor, 0)
   const totalRecebido = recebimentos.reduce((acc, r) => acc + r.valorCentavos, 0)
-  const saldoDevedor = totalGeral - totalRecebido
 
-  return { valorOriginal, totalAdicionais, totalGeral, totalRecebido, saldoDevedor }
+  return totaisResumoObraCliente(valorOriginal, totalRecebido, somaAdicionaisObra)
 }
 
 /* ────────── Ler Histórico de Pagamentos ────────── */

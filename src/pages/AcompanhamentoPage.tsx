@@ -7,7 +7,8 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import html2canvas from 'html2canvas'
 import { format } from 'date-fns'
-import { ObraSelector } from '../components/shared/ObraSelector'
+import { useSetShellContentWidthOverride } from '../context/ShellContentWidthOverrideContext'
+import { ObraSelectorCard } from '../components/shared/ObraSelectorCard'
 import { AcompanhamentoInAppTutorial } from '../components/acompanhamento/AcompanhamentoInAppTutorial'
 import { CreateSheetForm } from '../components/acompanhamento/CreateSheetForm'
 import { ManageSheet } from '../components/acompanhamento/ManageSheet'
@@ -24,6 +25,7 @@ type PageState =
 export function AcompanhamentoPage() {
   const navigate = useNavigate()
   const location = useLocation()
+  const setShellContentWidthOverride = useSetShellContentWidthOverride()
   const [pageState, setPageState] = useState<PageState>({ view: 'select' })
   const [obra, setObra] = useState<Obra | null>(null)
   const [summaryData, setSummaryData] = useState<ResumoObraData | null>(null)
@@ -147,6 +149,14 @@ export function AcompanhamentoPage() {
     void handleObraChange(initialObra)
   }, [initialObra, handleObraChange])
 
+  /* Seleção / criação de planilha: mesma largura útil do wizard; painel da planilha: coluna padrão */
+  useEffect(() => {
+    const useWideShell =
+      pageState.view === 'select' || pageState.view === 'loading' || pageState.view === 'create'
+    setShellContentWidthOverride(useWideShell ? 'wide' : null)
+    return () => setShellContentWidthOverride(null)
+  }, [pageState.view, setShellContentWidthOverride])
+
   return (
     <div className="relative">
       {/* Resumo oculto para exportação (renderizado off-screen) */}
@@ -172,12 +182,7 @@ export function AcompanhamentoPage() {
         </div>
 
       {/* Seletor de obra (sempre visível no topo) */}
-      <div className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm dark:border-gray-700 dark:bg-gray-900">
-        <ObraSelector
-          value={obra}
-          onChange={handleObraChange}
-        />
-      </div>
+      <ObraSelectorCard value={obra} onChange={handleObraChange} />
 
       {/* Estado: Loading */}
       {pageState.view === 'loading' && (

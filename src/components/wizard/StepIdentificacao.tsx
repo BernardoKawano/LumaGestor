@@ -5,7 +5,7 @@
 
 import { useCallback } from 'react'
 import { useWizardContext } from '../../hooks/useWizard'
-import { ObraSelector } from '../shared/ObraSelector'
+import { ObraSelectorCard } from '../shared/ObraSelectorCard'
 import { validateStep1, isValid } from '../../utils/validation'
 import { getObraMeta, getObraMetaDrive } from '../../utils/storage'
 import type { Obra } from '../../types'
@@ -52,8 +52,8 @@ export function StepIdentificacao() {
         <h2 className="mb-6 text-lg font-semibold text-gray-900 dark:text-gray-100">Identificação</h2>
 
         <div className="space-y-5">
-          {/* Obra */}
-          <ObraSelector
+          {/* Obra — mesmo cartão que em Acompanhamento */}
+          <ObraSelectorCard
             value={s.obra}
             onChange={handleObraChange}
             error={state.errors.obra}

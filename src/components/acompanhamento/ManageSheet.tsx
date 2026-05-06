@@ -8,6 +8,11 @@ import { FuncionarioCard } from './FuncionarioCard'
 import { CurrencyInput } from '../shared/CurrencyInput'
 import { formatCurrency } from '../../utils/currency'
 import {
+  isLinhaHistoricoAcrescimo,
+  parseIncrementoCentavosAcrescimoHistorico,
+  parseMotivoAcrescimoHistorico,
+} from '../../utils/funcionarioAcrescimo'
+import {
   readAllSummaries,
   readPaymentHistory,
   appendPayment,
@@ -25,6 +30,9 @@ import {
   updateAdicional,
   updatePayment,
   updateFuncionarioValorEsperado,
+  registrarAcrescimoValorEsperadoFuncionario,
+  deleteAcrescimoHistoricoFuncionario,
+  updateAcrescimoHistoricoFuncionario,
   formatObraSheetVisual,
   writeResumoToSheet,
   type FuncionarioSummary,
@@ -76,10 +84,22 @@ export function ManageSheet({ spreadsheetId, obraNome, obra, onSummaryDataChange
   const [payDesc, setPayDesc] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
-  // Form de adicional
+  // Acréscimo no total a receber (serviço extra, acordo com proprietário)
+  const [acrValor, setAcrValor] = useState(0)
+  const [acrDesc, setAcrDesc] = useState('')
+  const [acrSubmitting, setAcrSubmitting] = useState(false)
+
+  // Adicionais da obra (_CONFIG ADICIONAL — somam no total geral da obra)
+  const [obraAdicDesc, setObraAdicDesc] = useState('')
+  const [obraAdicValor, setObraAdicValor] = useState(0)
+  const [obraAdicData, setObraAdicData] = useState(() => new Date().toISOString().slice(0, 10))
+  const [addingObraAdicional, setAddingObraAdicional] = useState(false)
+
+  // Acréscimo ao colaborador (aba financeiro — mesmo efeito do bloco violeta; não altera total da obra)
+  const [addAcrFuncionarioNome, setAddAcrFuncionarioNome] = useState('')
   const [addDesc, setAddDesc] = useState('')
   const [addValor, setAddValor] = useState(0)
-  const [addingAdicional, setAddingAdicional] = useState(false)
+  const [addingColaboradorAcrescimo, setAddingColaboradorAcrescimo] = useState(false)
 
   // Form de novo funcionário
   const [showAddFuncionario, setShowAddFuncionario] = useState(false)
@@ -88,13 +108,16 @@ export function ManageSheet({ spreadsheetId, obraNome, obra, onSummaryDataChange
   const [addingFuncionario, setAddingFuncionario] = useState(false)
   const [addFuncionarioErro, setAddFuncionarioErro] = useState<string | null>(null)
 
-  // Tab do painel financeiro (adicionais em primeiro para facilitar acrescentar valor ao total)
-  const [finTab, setFinTab] = useState<'adicionais' | 'recebimentos'>('recebimentos')
+  const [finTab, setFinTab] = useState<'recebimentos' | 'adicionais-obra' | 'acrescimos-colaborador'>(
+    'recebimentos',
+  )
 
   // Edição inline
   const [editingRecebimento, setEditingRecebimento] = useState<number | null>(null)
   const [editingAdicional, setEditingAdicional] = useState<number | null>(null)
   const [editingPayment, setEditingPayment] = useState<number | null>(null)
+  /** Descrição completa da linha ao abrir edição de acréscimo (para calcular delta no _CONFIG). */
+  const [acrescimoEditDescricaoOriginal, setAcrescimoEditDescricaoOriginal] = useState<string | null>(null)
   const [editForm, setEditForm] = useState<{
     data?: string
     valor?: number
@@ -104,6 +127,20 @@ export function ManageSheet({ spreadsheetId, obraNome, obra, onSummaryDataChange
   const [savingEdit, setSavingEdit] = useState(false)
   const [deletingPaymentRow, setDeletingPaymentRow] = useState<number | null>(null)
   const [deletingRecebimentoRow, setDeletingRecebimentoRow] = useState<number | null>(null)
+
+  const applyMinValorEsperado = useCallback(
+    (lista: FuncionarioSummary[], nome: string, valorMinimo: number): FuncionarioSummary[] =>
+      lista.map((s) =>
+        s.nome === nome && s.valorEsperado < valorMinimo
+          ? {
+              ...s,
+              valorEsperado: valorMinimo,
+              saldoRestante: valorMinimo - s.totalPago,
+            }
+          : s,
+      ),
+    [],
+  )
   const [formattingSheet, setFormattingSheet] = useState(false)
   const [emailCliente, setEmailCliente] = useState('')
   const [copiado, setCopiado] = useState(false)
@@ -162,6 +199,7 @@ export function ManageSheet({ spreadsheetId, obraNome, obra, onSummaryDataChange
     setEditingRecebimento(null)
     setEditingAdicional(null)
     setEditingPayment(null)
+    setAcrescimoEditDescricaoOriginal(null)
     setEditForm({})
     setEditingValorEsperado(false)
     setEditingRascunhoId(null)
@@ -251,6 +289,16 @@ export function ManageSheet({ spreadsheetId, obraNome, obra, onSummaryDataChange
       .finally(() => setLoadingHistory(false))
   }, [spreadsheetId, selectedName])
 
+  useEffect(() => {
+    if (summaries.length === 0) {
+      setAddAcrFuncionarioNome('')
+      return
+    }
+    setAddAcrFuncionarioNome((prev) =>
+      prev && summaries.some((s) => s.nome === prev) ? prev : summaries[0].nome,
+    )
+  }, [summaries])
+
   // Registrar pagamento de funcionário
   const handleRegistrar = useCallback(async () => {
     if (!selectedName || payValor <= 0) return
@@ -286,15 +334,55 @@ export function ManageSheet({ spreadsheetId, obraNome, obra, onSummaryDataChange
     }
   }, [spreadsheetId, selectedName, payDate, payValor, payDesc])
 
-  // Adicionar adicional
-  const handleAddAdicional = useCallback(async () => {
-    if (!addDesc.trim() || addValor <= 0) return
+  const handleRegistrarAcrescimo = useCallback(async () => {
+    if (!selectedName) return
+    const sel = summaries.find((s) => s.nome === selectedName)
+    if (!sel || sel.sheetRow == null) return
+    if (acrValor <= 0) return
 
-    setAddingAdicional(true)
+    setAcrSubmitting(true)
     try {
-      await addAdicional(spreadsheetId, addDesc.trim(), addValor, new Date())
+      const esperadoMinimo = sel.valorEsperado + acrValor
+      await registrarAcrescimoValorEsperadoFuncionario(
+        spreadsheetId,
+        selectedName,
+        sel.sheetRow,
+        sel.valorEsperado,
+        acrValor,
+        acrDesc,
+      )
+      const [newHistory, allSums, fin] = await Promise.all([
+        readPaymentHistory(spreadsheetId, selectedName),
+        readAllSummaries(spreadsheetId),
+        readObraFinancialSummary(spreadsheetId),
+      ])
+      setHistory(newHistory)
+      setSummaries(applyMinValorEsperado(allSums.summaries, selectedName, esperadoMinimo))
+      setConfig(allSums.config)
+      setFinancial(fin)
+      setPaymentHistoryByFuncionario(allSums.paymentHistoryByFuncionario)
+      setAcrValor(0)
+      setAcrDesc('')
+    } catch (err) {
+      console.error('Erro ao registrar acréscimo:', err)
+    } finally {
+      setAcrSubmitting(false)
+    }
+  }, [spreadsheetId, selectedName, summaries, acrValor, acrDesc, applyMinValorEsperado])
 
-      // Recarregar
+  const handleAddObraAdicional = useCallback(async () => {
+    if (!obraAdicDesc.trim() || obraAdicValor <= 0) return
+
+    const parts = obraAdicData.split('-').map(Number)
+    const dataRef =
+      parts.length === 3 && parts.every((n) => !Number.isNaN(n))
+        ? new Date(parts[0], parts[1] - 1, parts[2])
+        : new Date()
+
+    setAddingObraAdicional(true)
+    try {
+      await addAdicional(spreadsheetId, obraAdicDesc.trim(), obraAdicValor, dataRef)
+
       const [newConfig, fin, receb] = await Promise.all([
         readAllSummaries(spreadsheetId),
         readObraFinancialSummary(spreadsheetId),
@@ -305,14 +393,52 @@ export function ManageSheet({ spreadsheetId, obraNome, obra, onSummaryDataChange
       setFinancial(fin)
       setRecebimentos(receb)
 
+      setObraAdicDesc('')
+      setObraAdicValor(0)
+      setObraAdicData(new Date().toISOString().slice(0, 10))
+    } catch (err) {
+      console.error('Erro ao adicionar adicional da obra:', err)
+    } finally {
+      setAddingObraAdicional(false)
+    }
+  }, [spreadsheetId, obraAdicDesc, obraAdicValor, obraAdicData])
+
+  const handleAddColaboradorAcrescimo = useCallback(async () => {
+    if (!addDesc.trim() || addValor <= 0 || !addAcrFuncionarioNome) return
+    const sel = summaries.find((s) => s.nome === addAcrFuncionarioNome)
+    if (!sel || sel.sheetRow == null) return
+
+    setAddingColaboradorAcrescimo(true)
+    try {
+      const esperadoMinimo = sel.valorEsperado + addValor
+      await registrarAcrescimoValorEsperadoFuncionario(
+        spreadsheetId,
+        addAcrFuncionarioNome,
+        sel.sheetRow,
+        sel.valorEsperado,
+        addValor,
+        addDesc.trim(),
+      )
+
+      const [newConfig, fin, receb] = await Promise.all([
+        readAllSummaries(spreadsheetId),
+        readObraFinancialSummary(spreadsheetId),
+        readRecebimentos(spreadsheetId),
+      ])
+      setConfig(newConfig.config)
+      setSummaries(applyMinValorEsperado(newConfig.summaries, addAcrFuncionarioNome, esperadoMinimo))
+      setFinancial(fin)
+      setRecebimentos(receb)
+      setPaymentHistoryByFuncionario(newConfig.paymentHistoryByFuncionario)
+
       setAddDesc('')
       setAddValor(0)
     } catch (err) {
-      console.error('Erro ao adicionar adicional:', err)
+      console.error('Erro ao registrar acréscimo ao colaborador:', err)
     } finally {
-      setAddingAdicional(false)
+      setAddingColaboradorAcrescimo(false)
     }
-  }, [spreadsheetId, addDesc, addValor])
+  }, [spreadsheetId, addDesc, addValor, addAcrFuncionarioNome, summaries, applyMinValorEsperado])
 
   // Adicionar funcionário
   const handleAddFuncionario = useCallback(async () => {
@@ -416,16 +542,39 @@ export function ManageSheet({ spreadsheetId, obraNome, obra, onSummaryDataChange
     const dataDate = new Date(editForm.data + 'T12:00:00')
     if (isNaN(dataDate.getTime())) return
 
+    const valorEdit = editForm.valor
+    const selAcrescimo =
+      acrescimoEditDescricaoOriginal != null
+        ? summaries.find((s) => s.nome === selectedName)
+        : undefined
+    if (acrescimoEditDescricaoOriginal) {
+      if (!selAcrescimo?.sheetRow || valorEdit == null || valorEdit <= 0) return
+    }
+
     setSavingEdit(true)
     try {
-      await updatePayment(
-        spreadsheetId,
-        selectedName,
-        editingPayment,
-        dataDate,
-        editForm.valor,
-        editForm.descricao ?? '',
-      )
+      if (acrescimoEditDescricaoOriginal && selAcrescimo?.sheetRow != null) {
+        await updateAcrescimoHistoricoFuncionario(
+          spreadsheetId,
+          selectedName,
+          editingPayment,
+          selAcrescimo.sheetRow,
+          selAcrescimo.valorEsperado,
+          acrescimoEditDescricaoOriginal,
+          dataDate,
+          valorEdit,
+          editForm.descricao ?? '',
+        )
+      } else {
+        await updatePayment(
+          spreadsheetId,
+          selectedName,
+          editingPayment,
+          dataDate,
+          valorEdit,
+          editForm.descricao ?? '',
+        )
+      }
       const [newHistory, allSums, fin] = await Promise.all([
         readPaymentHistory(spreadsheetId, selectedName),
         readAllSummaries(spreadsheetId),
@@ -438,12 +587,13 @@ export function ManageSheet({ spreadsheetId, obraNome, obra, onSummaryDataChange
       setPaymentHistoryByFuncionario(allSums.paymentHistoryByFuncionario)
       setEditingPayment(null)
       setEditForm({})
+      setAcrescimoEditDescricaoOriginal(null)
     } catch (err) {
       console.error('Erro ao salvar pagamento:', err)
     } finally {
       setSavingEdit(false)
     }
-  }, [spreadsheetId, selectedName, editingPayment, editForm])
+  }, [spreadsheetId, selectedName, editingPayment, editForm, acrescimoEditDescricaoOriginal, summaries])
 
   const handleDeleteRecebimento = useCallback(async (sheetRow: number) => {
     if (!window.confirm('Deseja excluir este recebimento? A linha será limpa na planilha.')) return
@@ -467,11 +617,29 @@ export function ManageSheet({ spreadsheetId, obraNome, obra, onSummaryDataChange
 
   const handleDeletePayment = useCallback(async (sheetRow: number) => {
     if (!selectedName) return
-    if (!window.confirm('Deseja excluir este pagamento? Esta ação pode ser desfeita editando a planilha.')) return
+    const line = history.find((h) => (h.sheetRow ?? 0) === sheetRow)
+    const isAcresc = line != null && isLinhaHistoricoAcrescimo(line.valorCentavos, line.descricao)
+    const msg = isAcresc
+      ? 'Excluir este acréscimo? O total a receber do colaborador será reduzido pelo valor do acréscimo.'
+      : 'Deseja excluir este pagamento? Esta ação pode ser desfeita editando a planilha.'
+    if (!window.confirm(msg)) return
 
     setDeletingPaymentRow(sheetRow)
     try {
-      await deletePayment(spreadsheetId, selectedName, sheetRow)
+      if (isAcresc && line) {
+        const sel = summaries.find((s) => s.nome === selectedName)
+        if (!sel || sel.sheetRow == null) throw new Error('Colaborador inválido')
+        await deleteAcrescimoHistoricoFuncionario(
+          spreadsheetId,
+          selectedName,
+          sheetRow,
+          sel.sheetRow,
+          sel.valorEsperado,
+          line.descricao,
+        )
+      } else {
+        await deletePayment(spreadsheetId, selectedName, sheetRow)
+      }
 
       const [newHistory, allSums, fin] = await Promise.all([
         readPaymentHistory(spreadsheetId, selectedName),
@@ -488,7 +656,7 @@ export function ManageSheet({ spreadsheetId, obraNome, obra, onSummaryDataChange
     } finally {
       setDeletingPaymentRow(null)
     }
-  }, [spreadsheetId, selectedName])
+  }, [spreadsheetId, selectedName, history, summaries])
 
   const selected = summaries.find((s) => s.nome === selectedName)
 
@@ -791,18 +959,20 @@ export function ManageSheet({ spreadsheetId, obraNome, obra, onSummaryDataChange
             <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">{obraNome}</h2>
             <div className="mt-0.5 text-sm text-gray-500 dark:text-gray-400">
               <span>
-                Valor total da obra:{' '}
+                Total geral com o cliente (contrato + adicionais da obra):{' '}
                 <strong className="text-gray-900 dark:text-gray-100">
                   {formatCurrency(financial?.totalGeral ?? config?.valorTotalObra ?? 0)}
                 </strong>
               </span>
               {financial && financial.totalAdicionais > 0 && (
-                <span className="ml-2 text-gray-400">
-                  (base: {formatCurrency(financial.valorOriginal)} + adicionais)
+                <span className="mt-1 block text-xs text-gray-400">
+                  Base contratual: {formatCurrency(financial.valorOriginal)} + adicionais obra:{' '}
+                  {formatCurrency(financial.totalAdicionais)}
                 </span>
               )}
               <p className="mt-1 text-xs text-gray-400">
-                Para acrescentar valores ao total, use a aba <strong>Adicionais</strong> no painel financeiro abaixo.
+                Extras ao cliente: aba <strong>Adicionais obra</strong>. Acréscimos só ao colaborador: aba{' '}
+                <strong>Acréscimos colaborador</strong> ou o painel do funcionário — não entram neste total.
               </p>
               {obra && (
                 <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -858,6 +1028,12 @@ export function ManageSheet({ spreadsheetId, obraNome, obra, onSummaryDataChange
       {/* ═══════ Painel Financeiro ═══════ */}
       {financial && (
         <div className="rounded-2xl border border-gray-100 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-900">
+          <div className="border-b border-gray-100 px-5 py-3 dark:border-gray-700">
+            <p className="text-xs leading-relaxed text-gray-500 dark:text-gray-400">
+              <strong>Total geral</strong> (com o cliente) = valor original + <strong>adicionais da obra</strong>.{' '}
+              <strong>Acréscimos ao colaborador</strong> aumentam só o que esse colaborador deve receber; não entram neste total.
+            </p>
+          </div>
           {/* Métricas */}
           {(() => {
             const totalRascunhos = rascunhos.reduce((a, r) => a + r.valorCentavos, 0)
@@ -865,26 +1041,24 @@ export function ManageSheet({ spreadsheetId, obraNome, obra, onSummaryDataChange
             const mostraRascunhos = rascunhos.length > 0
             return (
               <div className="grid grid-cols-2 gap-px bg-gray-100 dark:bg-gray-800 sm:grid-cols-4">
-                <MetricCard label="Valor Original" value={financial.valorOriginal} />
-                <MetricCard label="Adicionais" value={financial.totalAdicionais} accent="amber" />
-                <MetricCard label="Total Geral" value={financial.totalGeral} accent="blue" bold />
+                <MetricCard label="Valor original" value={financial.valorOriginal} />
+                <MetricCard label="Adicionais obra" value={financial.totalAdicionais} accent="amber" />
+                <MetricCard label="Total geral" value={financial.totalGeral} bold />
                 <MetricCard
-                  label={mostraRascunhos ? 'Saldo (c/ rascunhos)' : 'Saldo Devedor'}
+                  label={mostraRascunhos ? 'Saldo (c/ rascunhos)' : 'Saldo devedor'}
                   value={mostraRascunhos ? saldoComRascunhos : financial.saldoDevedor}
                   accent={(mostraRascunhos ? saldoComRascunhos : financial.saldoDevedor) <= 0 ? 'green' : 'red'}
-                  bold
                 />
               </div>
             )
           })()}
 
-          {/* Tabs: Adicionais | Recebimentos */}
           <div className="border-t border-gray-100 dark:border-gray-700">
-            <div className="flex border-b border-gray-100 dark:border-gray-700">
+            <div className="flex flex-wrap border-b border-gray-100 dark:border-gray-700">
               <button
                 type="button"
                 onClick={() => setFinTab('recebimentos')}
-                className={`flex-1 px-4 py-2.5 text-xs font-semibold uppercase tracking-wider transition-colors ${
+                className={`min-w-0 flex-1 px-3 py-2.5 text-[11px] font-semibold uppercase tracking-wider transition-colors sm:px-4 sm:text-xs ${
                   finTab === 'recebimentos'
                     ? 'border-b-2 border-gray-900 text-gray-900 dark:border-gray-100 dark:text-gray-100'
                     : 'text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200'
@@ -899,14 +1073,25 @@ export function ManageSheet({ spreadsheetId, obraNome, obra, onSummaryDataChange
               </button>
               <button
                 type="button"
-                onClick={() => setFinTab('adicionais')}
-                className={`flex-1 px-4 py-2.5 text-xs font-semibold uppercase tracking-wider transition-colors ${
-                  finTab === 'adicionais'
+                onClick={() => setFinTab('adicionais-obra')}
+                className={`min-w-0 flex-1 px-3 py-2.5 text-[11px] font-semibold uppercase tracking-wider transition-colors sm:px-4 sm:text-xs ${
+                  finTab === 'adicionais-obra'
                     ? 'border-b-2 border-gray-900 text-gray-900 dark:border-gray-100 dark:text-gray-100'
                     : 'text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200'
                 }`}
               >
-                Adicionais ({config?.adicionais.length ?? 0})
+                Adicionais obra
+              </button>
+              <button
+                type="button"
+                onClick={() => setFinTab('acrescimos-colaborador')}
+                className={`min-w-0 flex-1 px-3 py-2.5 text-[11px] font-semibold uppercase tracking-wider transition-colors sm:px-4 sm:text-xs ${
+                  finTab === 'acrescimos-colaborador'
+                    ? 'border-b-2 border-gray-900 text-gray-900 dark:border-gray-100 dark:text-gray-100'
+                    : 'text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200'
+                }`}
+              >
+                Acréscimos colaborador
               </button>
             </div>
 
@@ -1229,38 +1414,49 @@ export function ManageSheet({ spreadsheetId, obraNome, obra, onSummaryDataChange
                   </div>
                   )}
                 </div>
-              ) : (
-                /* ── Adicionais ── */
+              ) : finTab === 'adicionais-obra' ? (
                 <div className="space-y-4">
-                  {/* Form adicionar */}
-                  <div className="flex items-end gap-3">
-                    <div className="min-w-0 flex-1">
+                  <p className="text-xs leading-relaxed text-gray-500 dark:text-gray-400">
+                    Serviços ou valores <strong>extras cobrados ao cliente</strong>: somam no <strong>total geral</strong> da obra e gravam linhas{' '}
+                    <span className="font-mono">ADICIONAL</span> na aba <span className="font-mono">_CONFIG</span>.
+                  </p>
+                  <div className="flex flex-wrap items-end gap-3">
+                    <div className="w-36">
+                      <label className="mb-1 block text-xs text-gray-500 dark:text-gray-400">Data</label>
+                      <input
+                        type="date"
+                        value={obraAdicData}
+                        onChange={(e) => setObraAdicData(e.target.value)}
+                        className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-gray-200 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:focus:ring-gray-600"
+                      />
+                    </div>
+                    <div className="min-w-0 flex-1 basis-[200px]">
                       <label className="mb-1 block text-xs text-gray-500 dark:text-gray-400">Descrição</label>
                       <input
                         type="text"
-                        value={addDesc}
-                        onChange={(e) => setAddDesc(e.target.value)}
-                        placeholder="Ex: Serralheria, Elétrica extra..."
+                        value={obraAdicDesc}
+                        onChange={(e) => setObraAdicDesc(e.target.value)}
+                        placeholder="Ex: Serviços adicionais a partir de…"
                         className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-200 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:placeholder:text-gray-500 dark:focus:ring-gray-600"
                       />
                     </div>
                     <div className="w-40">
                       <label className="mb-1 block text-xs text-gray-500 dark:text-gray-400">Valor</label>
-                      <CurrencyInput value={addValor} onChange={setAddValor} />
+                      <CurrencyInput value={obraAdicValor} onChange={setObraAdicValor} />
                     </div>
                     <button
-                      onClick={handleAddAdicional}
-                      disabled={addingAdicional || !addDesc.trim() || addValor <= 0}
-                      className="shrink-0 rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-white"
+                      type="button"
+                      onClick={handleAddObraAdicional}
+                      disabled={addingObraAdicional || !obraAdicDesc.trim() || obraAdicValor <= 0}
+                      className="shrink-0 rounded-lg bg-amber-700 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-amber-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-amber-600 dark:hover:bg-amber-500"
                     >
-                      {addingAdicional ? 'Salvando...' : 'Adicionar'}
+                      {addingObraAdicional ? 'Gravando...' : 'Adicionar à obra'}
                     </button>
                   </div>
 
-                  {/* Lista */}
                   {(config?.adicionais.length ?? 0) === 0 ? (
                     <p className="py-6 text-center text-sm text-gray-500 dark:text-gray-400">
-                      Nenhum adicional registrado
+                      Nenhum adicional da obra registado
                     </p>
                   ) : (
                     <div className="overflow-hidden rounded-lg border border-gray-200 dark:border-gray-700">
@@ -1364,6 +1560,62 @@ export function ManageSheet({ spreadsheetId, obraNome, obra, onSummaryDataChange
                       </div>
                     </div>
                   )}
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <p className="text-xs leading-relaxed text-gray-500 dark:text-gray-400">
+                    Aumenta o <strong>total a receber</strong> do colaborador escolhido (e regista nota no histórico dele).
+                    O valor total da obra com o cliente <strong>não</strong> muda.
+                  </p>
+                  <div className="flex flex-wrap items-end gap-3">
+                    <div className="w-full min-w-[12rem] sm:w-56">
+                      <label className="mb-1 block text-xs text-gray-500 dark:text-gray-400">Colaborador</label>
+                      <select
+                        value={addAcrFuncionarioNome}
+                        onChange={(e) => setAddAcrFuncionarioNome(e.target.value)}
+                        disabled={summaries.length === 0}
+                        className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-gray-200 disabled:cursor-not-allowed disabled:opacity-60 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:focus:ring-gray-600"
+                      >
+                        {summaries.length === 0 ? (
+                          <option value="">Nenhum colaborador</option>
+                        ) : (
+                          summaries.map((s) => (
+                            <option key={s.nome} value={s.nome}>
+                              {s.nome}
+                            </option>
+                          ))
+                        )}
+                      </select>
+                    </div>
+                    <div className="min-w-0 flex-1 basis-[200px]">
+                      <label className="mb-1 block text-xs text-gray-500 dark:text-gray-400">Descrição</label>
+                      <input
+                        type="text"
+                        value={addDesc}
+                        onChange={(e) => setAddDesc(e.target.value)}
+                        placeholder="Ex: Serviço extra pedido pelo proprietário"
+                        className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-200 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:placeholder:text-gray-500 dark:focus:ring-gray-600"
+                      />
+                    </div>
+                    <div className="w-40">
+                      <label className="mb-1 block text-xs text-gray-500 dark:text-gray-400">Valor do acréscimo</label>
+                      <CurrencyInput value={addValor} onChange={setAddValor} />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleAddColaboradorAcrescimo}
+                      disabled={
+                        addingColaboradorAcrescimo ||
+                        !addDesc.trim() ||
+                        addValor <= 0 ||
+                        !addAcrFuncionarioNome ||
+                        summaries.find((s) => s.nome === addAcrFuncionarioNome)?.sheetRow == null
+                      }
+                      className="shrink-0 rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-white"
+                    >
+                      {addingColaboradorAcrescimo ? 'Aplicando...' : 'Aplicar acréscimo'}
+                    </button>
+                  </div>
                 </div>
               )}
             </div>
@@ -1595,6 +1847,48 @@ export function ManageSheet({ spreadsheetId, obraNome, obra, onSummaryDataChange
             </div>
           </div>
 
+          {/* Acréscimo no total a receber (não é pagamento efetivo) */}
+          {selected.sheetRow != null && (
+            <div className="border-b border-gray-100 bg-violet-50/40 px-6 py-4 dark:border-gray-700 dark:bg-violet-950/25">
+              <p className="mb-1 text-xs font-semibold uppercase tracking-wider text-violet-800 dark:text-violet-300">
+                Acréscimo no total do colaborador
+              </p>
+              <p className="mb-3 text-xs leading-relaxed text-violet-900/80 dark:text-violet-200/85">
+                Quando o proprietário pede um serviço extra ou outro acordo, aumente aqui o valor total combinado para
+                este colaborador. Isto não registra dinheiro pago — use «Novo Pagamento» para transferências efetivas.
+                O total da obra com o cliente não é alterado por estes acréscimos — só o combinado com o colaborador.
+              </p>
+              <div className="flex flex-wrap items-end gap-3">
+                <div className="w-40">
+                  <label className="mb-1 block text-xs text-violet-800 dark:text-violet-300">Valor do acréscimo</label>
+                  <CurrencyInput
+                    value={acrValor}
+                    onChange={setAcrValor}
+                    className="[&_input]:py-1.5 [&_input]:text-sm"
+                  />
+                </div>
+                <div className="min-w-0 flex-1 basis-[200px]">
+                  <label className="mb-1 block text-xs text-violet-800 dark:text-violet-300">Motivo (opcional)</label>
+                  <input
+                    type="text"
+                    value={acrDesc}
+                    onChange={(e) => setAcrDesc(e.target.value)}
+                    placeholder="Ex.: Muro de arrimo extra solicitado pelo proprietário"
+                    className="w-full rounded-lg border border-violet-200 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-violet-400/60 focus:outline-none focus:ring-2 focus:ring-violet-200 dark:border-violet-700 dark:bg-gray-800 dark:text-gray-100 dark:placeholder:text-violet-500/50 dark:focus:ring-violet-700"
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={handleRegistrarAcrescimo}
+                  disabled={acrSubmitting || acrValor <= 0}
+                  className="shrink-0 rounded-lg bg-violet-700 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-violet-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-violet-600 dark:hover:bg-violet-500"
+                >
+                  {acrSubmitting ? 'Aplicando...' : 'Aplicar acréscimo'}
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Form novo pagamento */}
           <div className="border-b border-gray-100 bg-gray-50/50 px-6 py-4 dark:border-gray-700 dark:bg-gray-800/40">
             <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">
@@ -1665,6 +1959,7 @@ export function ManageSheet({ spreadsheetId, obraNome, obra, onSummaryDataChange
                 {history.map((p, i) => {
                   const sheetRow = p.sheetRow ?? (2 + i)
                   const isEditing = editingPayment === sheetRow
+                  const isAcrescimoNota = isLinhaHistoricoAcrescimo(p.valorCentavos, p.descricao)
                   return (
                     <div
                       key={sheetRow}
@@ -1681,6 +1976,9 @@ export function ManageSheet({ spreadsheetId, obraNome, obra, onSummaryDataChange
                             className="rounded border border-gray-200 bg-white px-2 py-1 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-gray-200 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:focus:ring-gray-600"
                           />
                           <div className="min-w-0">
+                            {acrescimoEditDescricaoOriginal ? (
+                              <p className="mb-0.5 text-[10px] text-violet-700 dark:text-violet-300">Valor do acréscimo</p>
+                            ) : null}
                             <CurrencyInput
                               value={editForm.valor ?? p.valorCentavos}
                               onChange={(v) => setEditForm((f) => ({ ...f, valor: v }))}
@@ -1691,7 +1989,7 @@ export function ManageSheet({ spreadsheetId, obraNome, obra, onSummaryDataChange
                             type="text"
                             value={editForm.descricao ?? p.descricao}
                             onChange={(e) => setEditForm((f) => ({ ...f, descricao: e.target.value }))}
-                            placeholder="Descrição"
+                            placeholder={acrescimoEditDescricaoOriginal ? 'Motivo (opcional)' : 'Descrição'}
                             className="min-w-0 rounded border border-gray-200 bg-white px-2 py-1 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-gray-200 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:focus:ring-gray-600"
                           />
                           <div className="flex items-center gap-1">
@@ -1709,6 +2007,7 @@ export function ManageSheet({ spreadsheetId, obraNome, obra, onSummaryDataChange
                               onClick={() => {
                                 setEditingPayment(null)
                                 setEditForm({})
+                                setAcrescimoEditDescricaoOriginal(null)
                               }}
                               className="rounded p-1 text-gray-400 transition-colors hover:bg-gray-100 dark:hover:bg-gray-800"
                               title="Cancelar"
@@ -1722,17 +2021,38 @@ export function ManageSheet({ spreadsheetId, obraNome, obra, onSummaryDataChange
                       ) : (
                         <>
                           <span className="text-sm text-gray-600 dark:text-gray-400">{p.data}</span>
-                          <span className="font-mono text-sm tabular-nums text-gray-900 dark:text-gray-100">{p.valor}</span>
+                          {isAcrescimoNota ? (
+                            <span
+                              className="text-xs font-medium text-violet-700 dark:text-violet-300"
+                              title="Registro de acréscimo no total combinado; valor pago = R$ 0,00"
+                            >
+                              R$ 0,00 · acréscimo
+                            </span>
+                          ) : (
+                            <span className="font-mono text-sm tabular-nums text-gray-900 dark:text-gray-100">{p.valor}</span>
+                          )}
                           <span className="text-sm text-gray-500 dark:text-gray-400">{p.descricao}</span>
                           <div className="flex items-center justify-end gap-1">
                             <button
+                              type="button"
                               onClick={() => {
                                 setEditingPayment(sheetRow)
-                                setEditForm({
-                                  data: dateBRToISO(p.data),
-                                  valor: p.valorCentavos,
-                                  descricao: p.descricao,
-                                })
+                                if (isAcrescimoNota) {
+                                  setAcrescimoEditDescricaoOriginal(p.descricao)
+                                  const inc = parseIncrementoCentavosAcrescimoHistorico(p.descricao) ?? 0
+                                  setEditForm({
+                                    data: dateBRToISO(p.data),
+                                    valor: inc,
+                                    descricao: parseMotivoAcrescimoHistorico(p.descricao),
+                                  })
+                                } else {
+                                  setAcrescimoEditDescricaoOriginal(null)
+                                  setEditForm({
+                                    data: dateBRToISO(p.data),
+                                    valor: p.valorCentavos,
+                                    descricao: p.descricao,
+                                  })
+                                }
                               }}
                               className="rounded p-1 text-gray-300 transition-colors hover:bg-gray-100 hover:text-gray-600 dark:text-gray-500 dark:hover:bg-gray-800 dark:hover:text-gray-300"
                               title="Editar"
@@ -1742,6 +2062,7 @@ export function ManageSheet({ spreadsheetId, obraNome, obra, onSummaryDataChange
                               </svg>
                             </button>
                             <button
+                              type="button"
                               onClick={() => handleDeletePayment(sheetRow)}
                               disabled={deletingPaymentRow === sheetRow}
                               className="rounded p-1 text-red-400 transition-colors hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-60 dark:hover:bg-red-950/40 dark:hover:text-red-400"
