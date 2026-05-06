@@ -73,6 +73,25 @@ export function listByStatus(status: StatusSolicitacao): SolicitacaoResumo[] {
   return listSolicitacoes().filter((s) => s.status === status)
 }
 
+/**
+ * Remove um resumo do Kanban (localStorage + sync do manifesto JSON no Drive).
+ * Não apaga planilhas de acompanhamento nem PDFs — apenas o registro na lista de status.
+ */
+export function removeSolicitacao(id: string): boolean {
+  const all = getAll()
+  const next = all.filter((s) => s.id !== id)
+  if (next.length === all.length) return false
+  saveAll(next)
+  syncToDrive(next).catch(() => {})
+  return true
+}
+
+/** Remove todos os cartões do quadro de status (mesma ressalva que `removeSolicitacao`). */
+export function removeAllSolicitacoes(): void {
+  saveAll([])
+  syncToDrive([]).catch(() => {})
+}
+
 /* ────────── Google Drive sync ────────── */
 
 const DRIVE_META_FILE = '_luma-solicitacoes.json'

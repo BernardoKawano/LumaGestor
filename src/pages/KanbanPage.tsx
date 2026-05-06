@@ -3,6 +3,8 @@
    3 colunas: Gerada | Enviada | Paga
    Ao mover para "Paga", exibe modal para confirmar data
    e registra o recebimento na planilha de acompanhamento.
+   Excluir cartão / todos: só remove o manifesto local + JSON no Drive;
+   não apaga planilhas nem PDFs.
    ──────────────────────────────────────────── */
 
 import { useCallback, useEffect, useState } from 'react'
@@ -11,6 +13,8 @@ import type { SolicitacaoResumo, StatusSolicitacao } from '../types'
 import {
   listSolicitacoes,
   loadFromDrive,
+  removeAllSolicitacoes,
+  removeSolicitacao,
   updateSolicitacaoStatus,
 } from '../utils/solicitacoes-store'
 import { formatCurrency } from '../utils/currency'
@@ -88,6 +92,29 @@ export function KanbanPage() {
     [pagaModalItem],
   )
 
+  const handleDeleteCard = useCallback((item: SolicitacaoResumo) => {
+    const ok = window.confirm(
+      `Remover o cartão "${item.obraNome}" do quadro de Status?\n\n` +
+        'As planilhas de obra e os PDFs no Google Drive não serão apagados — apenas este registro na lista.',
+    )
+    if (!ok) return
+    removeSolicitacao(item.id)
+    setItems(listSolicitacoes())
+    setPagaModalItem((open) => (open?.id === item.id ? null : open))
+  }, [])
+
+  const handleDeleteAll = useCallback(() => {
+    if (items.length === 0) return
+    const ok = window.confirm(
+      `Remover todos os ${items.length} cartões do quadro de Status?\n\n` +
+        'Isto não apaga planilhas de acompanhamento nem arquivos PDF no Drive — apenas a lista de acompanhamento neste aplicativo.',
+    )
+    if (!ok) return
+    removeAllSolicitacoes()
+    setItems([])
+    setPagaModalItem(null)
+  }, [items.length])
+
   const getNextStatus = (current: StatusSolicitacao): StatusSolicitacao | null => {
     if (current === 'gerada') return 'enviada'
     if (current === 'enviada') return 'paga'
@@ -103,19 +130,30 @@ export function KanbanPage() {
   return (
     <div className="space-y-6 text-gray-900 dark:text-gray-100">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-xl font-semibold text-gray-900 dark:text-gray-100">Status</h1>
           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
             Acompanhe suas solicitações de pagamento
           </p>
         </div>
-        <button
-          onClick={() => navigate('/wizard')}
-          className="rounded-lg bg-gray-900 px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-gray-800 dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-white"
-        >
-          Nova Solicitação
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={handleDeleteAll}
+            disabled={items.length === 0}
+            className="rounded-lg border border-red-200 bg-white px-4 py-2.5 text-sm font-medium text-red-700 transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-red-900/60 dark:bg-gray-900 dark:text-red-400 dark:hover:bg-red-950/40"
+          >
+            Excluir todos
+          </button>
+          <button
+            type="button"
+            onClick={() => navigate('/wizard')}
+            className="rounded-lg bg-gray-900 px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-gray-800 dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-white"
+          >
+            Nova Solicitação
+          </button>
+        </div>
       </div>
 
       {/* Kanban board */}
@@ -161,6 +199,7 @@ export function KanbanPage() {
                         <KanbanCard
                           key={item.id}
                           item={item}
+                          onDelete={() => handleDeleteCard(item)}
                           onMoveNext={
                             nextStatus
                               ? nextStatus === 'paga'
@@ -207,11 +246,13 @@ export function KanbanPage() {
 
 function KanbanCard({
   item,
+  onDelete,
   onMoveNext,
   onMovePrev,
   nextLabel,
 }: {
   item: SolicitacaoResumo
+  onDelete: () => void
   onMoveNext?: () => void
   onMovePrev?: () => void
   nextLabel?: string
@@ -222,10 +263,30 @@ function KanbanCard({
     <div className="rounded-xl border border-gray-100 bg-white p-4 shadow-sm transition-shadow hover:shadow-md dark:border-gray-700 dark:bg-gray-800/80">
       {/* Obra + data */}
       <div className="flex items-start justify-between gap-2">
-        <p className="text-sm font-semibold leading-tight text-gray-900 dark:text-gray-100">
+        <p className="min-w-0 flex-1 text-sm font-semibold leading-tight text-gray-900 dark:text-gray-100">
           {item.obraNome}
         </p>
-        <span className="shrink-0 text-[10px] text-gray-400 dark:text-gray-500">{dataFormatada}</span>
+        <div className="flex shrink-0 items-start gap-1">
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation()
+              onDelete()
+            }}
+            className="rounded-md p-1 text-gray-400 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/40 dark:hover:text-red-400"
+            title="Remover cartão do quadro"
+            aria-label="Remover cartão do quadro"
+          >
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+              />
+            </svg>
+          </button>
+          <span className="text-[10px] text-gray-400 dark:text-gray-500">{dataFormatada}</span>
+        </div>
       </div>
 
       {/* Cliente */}
