@@ -55,6 +55,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setIsReady(true)
       } catch (err) {
         console.error('Erro ao inicializar Google APIs:', err)
+        // Evita loader infinito quando configuração/env do Google estiver inválida.
+        // A Home continua acessível e o erro fica visível no console para diagnóstico.
+        setIsReady(true)
       }
     }
     init()
