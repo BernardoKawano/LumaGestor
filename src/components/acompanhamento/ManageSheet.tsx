@@ -4,7 +4,9 @@
    ──────────────────────────────────────────── */
 
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { pdf } from '@react-pdf/renderer'
 import { FuncionarioCard } from './FuncionarioCard'
+import { RelatorioClientePdf } from '../pdf/RelatorioClientePdf'
 import { CurrencyInput } from '../shared/CurrencyInput'
 import { formatCurrency } from '../../utils/currency'
 import {
@@ -43,6 +45,10 @@ import {
   type AdicionalConfig,
 } from '../../services/google-sheets-obras'
 import { formatDateBR, dateBRToISO } from '../../utils/date'
+import {
+  buildRelatorioPagamentosCliente,
+  nomeArquivoRelatorioPagamentosCliente,
+} from '../../utils/relatorioPagamentosCliente'
 
 import type { ResumoObraData, RascunhoPagamento } from './ResumoObra'
 import type { RascunhoRecebimentoSheet } from '../../services/google-sheets-obras'
@@ -142,6 +148,8 @@ export function ManageSheet({ spreadsheetId, obraNome, obra, onSummaryDataChange
     [],
   )
   const [formattingSheet, setFormattingSheet] = useState(false)
+  const [gerandoRelatorioPdf, setGerandoRelatorioPdf] = useState(false)
+  const [erroRelatorioPdf, setErroRelatorioPdf] = useState<string | null>(null)
   const [emailCliente, setEmailCliente] = useState('')
   const [copiado, setCopiado] = useState(false)
   const [editingValorEsperado, setEditingValorEsperado] = useState(false)
@@ -207,6 +215,7 @@ export function ManageSheet({ spreadsheetId, obraNome, obra, onSummaryDataChange
     setEditingRascunhoPagId(null)
     setEditRascunhoPagForm(null)
     setResumoSheetError(null)
+    setErroRelatorioPdf(null)
     if (resumoWriteTimerRef.current) {
       clearTimeout(resumoWriteTimerRef.current)
       resumoWriteTimerRef.current = null
@@ -913,6 +922,35 @@ export function ManageSheet({ spreadsheetId, obraNome, obra, onSummaryDataChange
     }
   }, [obra, emailCliente])
 
+  const handleGerarRelatorioPdf = useCallback(async () => {
+    if (!financial) return
+    setGerandoRelatorioPdf(true)
+    setErroRelatorioPdf(null)
+    try {
+      const relatorio = buildRelatorioPagamentosCliente({
+        obraNome,
+        valorOriginalCentavos: financial.valorOriginal,
+        adicionais: config?.adicionais ?? [],
+        recebimentos,
+      })
+      const blob = await pdf(<RelatorioClientePdf relatorio={relatorio} />).toBlob()
+      const nome = nomeArquivoRelatorioPagamentosCliente(obraNome, relatorio.geradoEm)
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = nome
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      setTimeout(() => URL.revokeObjectURL(url), 1500)
+    } catch (err) {
+      console.error('Erro ao gerar relatório PDF:', err)
+      setErroRelatorioPdf('Não foi possível gerar o PDF. Tente de novo.')
+    } finally {
+      setGerandoRelatorioPdf(false)
+    }
+  }, [financial, obraNome, config, recebimentos])
+
   const handleCopiarEmail = useCallback(async () => {
     if (!emailCliente.trim()) return
     try {
@@ -1028,11 +1066,25 @@ export function ManageSheet({ spreadsheetId, obraNome, obra, onSummaryDataChange
       {/* ═══════ Painel Financeiro ═══════ */}
       {financial && (
         <div className="rounded-2xl border border-gray-100 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-900">
-          <div className="border-b border-gray-100 px-5 py-3 dark:border-gray-700">
-            <p className="text-xs leading-relaxed text-gray-500 dark:text-gray-400">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-100 px-5 py-3 dark:border-gray-700">
+            <p className="min-w-0 flex-1 text-xs leading-relaxed text-gray-500 dark:text-gray-400">
               <strong>Total geral</strong> (com o cliente) = valor original + <strong>adicionais da obra</strong>.{' '}
               <strong>Acréscimos ao colaborador</strong> aumentam só o que esse colaborador deve receber; não entram neste total.
             </p>
+            <div className="flex shrink-0 flex-col items-end gap-1">
+              <button
+                type="button"
+                onClick={handleGerarRelatorioPdf}
+                disabled={gerandoRelatorioPdf}
+                title="PDF com valor original, adicionais da obra e pagamentos recebidos pela MaMM. Não inclui colaboradores."
+                className="rounded-lg bg-gray-900 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-white"
+              >
+                {gerandoRelatorioPdf ? 'Gerando PDF...' : 'Relatório PDF'}
+              </button>
+              {erroRelatorioPdf && (
+                <p className="max-w-64 text-right text-[11px] text-red-600 dark:text-red-400">{erroRelatorioPdf}</p>
+              )}
+            </div>
           </div>
           {/* Métricas */}
           {(() => {

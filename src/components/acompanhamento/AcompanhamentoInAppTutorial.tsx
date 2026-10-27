@@ -24,7 +24,7 @@ const STEPS = [
   },
   {
     title: 'Resumo em imagem',
-    text: 'O botão flutuante verde gera uma imagem PNG do resumo para partilhar ou guardar.',
+    text: 'O botão flutuante verde gera uma imagem PNG do resumo completo. No painel financeiro, Relatório PDF baixa só o que o cliente pagou à MaMM: valor original, adicionais e recebimentos, sem pagamentos de colaboradores.',
   },
 ] as const
 
